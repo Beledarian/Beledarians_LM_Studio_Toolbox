@@ -7,11 +7,11 @@ import {
   type PredictionProcessStatusController,
   type PromptPreprocessorController,
 } from "@lmstudio/sdk";
-import { readFile } from "fs/promises";
+import { readFile, writeFile } from "fs/promises";
 import { join } from "path";
 import { pluginConfigSchematics } from "./config";
 import { TOOLS_DOCUMENTATION } from "./toolsDocumentation";
-import { getPersistedState } from "./stateManager";
+import { getPersistedState, savePersistedState } from "./stateManager";
 
 type DocumentContextInjectionStrategy = "none" | "inject-full-content" | "retrieval";
 
@@ -68,28 +68,58 @@ export async function promptPreprocessor(ctl: PromptPreprocessorController, user
       currentContent = userPrompt;
   }
 
-  // 2. Tools Documentation & Memory Injection (Startup)
+  // --- Delegation & Safety Instructions (Every Turn) ---
+  const pluginConfig = ctl.getPluginConfig(pluginConfigSchematics);
+  const frequency = pluginConfig.get("subAgentFrequency");
+  const debugMode = pluginConfig.get("enableDebugMode");
+
+  let delegationHint = "";
+
+  if (frequency === "always") {
+      delegationHint = "\n\n**SYSTEM MANDATE:** You MUST delegate ALL information retrieval, news summaries, and **ALL coding tasks** (creation, editing, refactoring) to the secondary agent. Do NOT write code or use search tools yourself. Use `consult_secondary_agent` with `allow_tools: true`.\n\n**PRE-DELEGATION CHECKLIST:**\n1. Run `list_directory` to see what files already exist.\n2. Read `beledarian_info.md` or `README.md` if present to understand the project state.\n3. ONLY THEN delegate the task, providing the context you found.";
+  } else if (frequency === "when_useful") {
+      delegationHint = "\n\n**SYSTEM ADVICE:** For 'news', 'current events', or **ANY coding project** (generating apps, multi-file edits), you are STRONGLY ADVISED to delegate to the secondary agent (role: 'coder' or 'summarizer') with `allow_tools: true`. Do not write complex code yourself.\n\n**PRE-DELEGATION CHECKLIST:**\n1. Run `list_directory` to see what files already exist.\n2. Read `beledarian_info.md` or `README.md` if present.\n3. Provide this context to the sub-agent to avoid overwriting work.\n";
+      
+      if (debugMode) {
+          delegationHint += "Note: The 'Auto-Debug' feature is ACTIVE. Delegating code to the sub-agent will automatically verify and fix bugs. This is much safer than writing it yourself.\n";
+      }
+      
+      delegationHint += "\n**New Project Protocol:** If creating a new app, instruct the sub-agent to create a specific subfolder and research documentation first.\n";
+      delegationHint += "**Efficient Edits:** Use `replace_text_in_file` for small changes.\n";
+
+  } else if (frequency === "hard_tasks") {
+      delegationHint = "\n\n**Delegation Hint:** Only delegate EXTREMELY complex or computationally expensive tasks to the secondary agent. Handle standard queries and file reads yourself.\n";
+  }
+
+  // Append the hint to the user message (effective system instruction for this turn)
+  if (delegationHint) {
+      currentContent += delegationHint;
+  }
+
+  // 2. Tools Documentation & Memory Injection (Startup Only)
   if (isFirstTurn) {
     let injectionContent = TOOLS_DOCUMENTATION;
 
-    // Memory Injection
-    const pluginConfig = ctl.getPluginConfig(pluginConfigSchematics);
-    const enableMemory = pluginConfig.get("enableMemory");
-    
-    if (enableMemory) {
-        try {
-            const { currentWorkingDirectory } = await getPersistedState();
-            const memoryPath = join(currentWorkingDirectory, "memory.md");
-            const memoryContent = await readFile(memoryPath, "utf-8");
-            
-            if (memoryContent.trim().length > 0) {
-                injectionContent = `\n\n---\n\n${memoryContent}\n\n---\n\n${injectionContent}`;
-                ctl.debug("Memory loaded and injected into context.");
+    try {
+        const { currentWorkingDirectory } = await getPersistedState();
+        const startupPath = join(currentWorkingDirectory, "startup.md");
+        const startupContent = await readFile(startupPath, "utf-8");
+        const filesToRead = startupContent.split('\n').map(f => f.trim()).filter(f => f);
+
+        for (const file of filesToRead) {
+            const filePath = join(currentWorkingDirectory, file);
+            try {
+                const fileContent = await readFile(filePath, "utf-8");
+                if (fileContent.trim().length > 0) {
+                    injectionContent = `\n\n---\n\n${fileContent}\n\n---\n\n${injectionContent}`;
+                    ctl.debug(`${file} loaded and injected into context.`);
+                }
+            } catch (e) {
+                ctl.debug(`Failed to load ${file} from startup.md.`);
             }
-        } catch (e) {
-            // Memory file likely doesn't exist yet, which is fine
-            ctl.debug("No existing memory file found or failed to load.");
         }
+    } catch (e) {
+        ctl.debug("No startup.md file found or failed to load.");
     }
 
     currentContent = `${injectionContent}\n\n---\n\n${currentContent}`;
@@ -99,6 +129,18 @@ export async function promptPreprocessor(ctl: PromptPreprocessorController, user
   // (The SDK expects a string to replace content, or the message object)
   if (currentContent !== userPrompt) {
       return currentContent;
+  }
+
+  // Update message count and memory
+  try {
+    const state = await getPersistedState();
+    state.messageCount++;
+    await savePersistedState(state);
+
+    // Auto-summary disabled due to SDK type mismatch
+    // if (state.messageCount % 10 === 0) { ... }
+  } catch (e) {
+    ctl.debug("Failed to update message count or memory.", e);
   }
   
   return userMessage;

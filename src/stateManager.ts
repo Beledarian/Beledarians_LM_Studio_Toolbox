@@ -7,6 +7,8 @@ const DEFAULT_DIR = join(os.homedir(), ".beledarians-llm-toolbox", "workspace");
 
 export interface PluginState {
   currentWorkingDirectory: string;
+  messageCount: number;
+  dontAskToCompress: boolean;
 }
 
 export async function getPersistedState(): Promise<PluginState> {
@@ -14,9 +16,17 @@ export async function getPersistedState(): Promise<PluginState> {
     const statePath = join(os.homedir(), ".beledarians-llm-toolbox", CONFIG_FILE_NAME);
     const content = await readFile(statePath, "utf-8");
     const state = JSON.parse(content);
-    return state.currentWorkingDirectory ? state : { currentWorkingDirectory: DEFAULT_DIR };
+    return {
+      currentWorkingDirectory: state.currentWorkingDirectory ?? DEFAULT_DIR,
+      messageCount: state.messageCount ?? 0,
+      dontAskToCompress: state.dontAskToCompress ?? false,
+    };
   } catch (error) {
-    return { currentWorkingDirectory: DEFAULT_DIR };
+    return {
+      currentWorkingDirectory: DEFAULT_DIR,
+      messageCount: 0,
+      dontAskToCompress: false,
+    };
   }
 }
 
