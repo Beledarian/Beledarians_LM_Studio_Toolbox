@@ -19,7 +19,7 @@ This project is a plugin for [LM Studio](https://lmstudio.ai/) that provides a r
 
 ## Installation
 
-You can install this plugin directly from the LM Studio Hub:
+The plugin can be installed using the following link:
 
 [https://lmstudio.ai/beledarian/beledarians-lm-studio-tools](https://lmstudio.ai/beledarian/beledarians-lm-studio-tools)
 
