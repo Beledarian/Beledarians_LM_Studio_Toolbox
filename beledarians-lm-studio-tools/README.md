@@ -1,5 +1,7 @@
 # Beledarian's LM Studio Tools
 
+[![GitHub](https://img.shields.io/badge/GitHub-Repository-blue?logo=github)](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox)
+
 This project is a plugin for [LM Studio](https://lmstudio.ai/) that provides a rich set of tools to a large language model. It allows the LLM to interact with your local file system, execute code, access the internet, and more. This empowers the LLM to perform complex tasks like code generation, project scaffolding, and web research.
 
 ## Features
