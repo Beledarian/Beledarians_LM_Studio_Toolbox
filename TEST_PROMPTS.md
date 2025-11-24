@@ -1,6 +1,6 @@
 # Testing New T-Tools Features
 
-Use these prompts to verify the newly added functionality. Ensure you have enabled the respective features in the plugin settings.
+Use these prompts to verify the functionality. Ensure you have enabled the respective features in the plugin settings.
 
 ## 1. Wikipedia Search
 **Prompt:**
