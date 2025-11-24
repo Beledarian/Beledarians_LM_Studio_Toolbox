@@ -31,6 +31,18 @@ export const pluginConfigSchematics = createConfigSchematics()
     displayName: "Allow Shell Command Execution",
     subtitle: "Enable the 'execute_command' tool. DANGER: Commands run on your machine.",
   }, false)
+  .field("allowGitOperations", "boolean", {
+    displayName: "Allow Git Operations",
+    subtitle: "Enable git tools (status, commit, diff, log).",
+  }, true)
+  .field("allowDatabaseInspection", "boolean", {
+    displayName: "Allow Database Inspection",
+    subtitle: "Enable 'query_database' for SQLite files.",
+  }, false)
+  .field("allowSystemNotifications", "boolean", {
+    displayName: "Allow System Notifications",
+    subtitle: "Enable the agent to send OS notifications.",
+  }, true)
   .field("allowAllCode", "boolean", {
     displayName: "Allow All Code Execution",
     subtitle: "MASTER SWITCH: Overrides all other settings to enable ALL execution tools.",
@@ -39,6 +51,10 @@ export const pluginConfigSchematics = createConfigSchematics()
     displayName: "Search API Key",
     subtitle: "Optional API key for search services (if supported) to avoid rate limits.",
   }, "")
+  .field("embeddingModel", "string", {
+    displayName: "Embedding Model",
+    subtitle: "Model to use for RAG features (default: nomic-ai/nomic-embed-text-v1.5-GGUF)",
+  }, "nomic-ai/nomic-embed-text-v1.5-GGUF")
     .field("enableMemory", "boolean", {
       displayName: "Enable Memory",
       subtitle: "If enabled, the model can save and recall information from a 'memory.md' file in the workspace.",

@@ -97,6 +97,12 @@ export async function promptPreprocessor(ctl: PromptPreprocessorController, user
   const enableSecondary = pluginConfig.get("enableSecondaryAgent");
   const state = await getPersistedState();
 
+  // Reset the injection flag on the first turn of a new conversation
+  if (isFirstTurn) {
+      state.subAgentDocsInjected = false;
+      await savePersistedState(state);
+  }
+
   if (enableSecondary && !state.subAgentDocsInjected) {
       try {
           const { currentWorkingDirectory } = state;
