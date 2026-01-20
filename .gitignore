@@ -2,3 +2,4 @@
 node_modules
 fix-bugs.js
 fix-bugs-v2.js
+test_security_fixes.ts

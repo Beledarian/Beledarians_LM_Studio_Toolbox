@@ -153,7 +153,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           const args = [];
           if (cached) args.push("--cached");
           if (file_path) args.push(validatePath(currentWorkingDirectory, file_path));
-          
+
           const diff = await git.diff(args);
           return { diff: diff || "No changes." };
         } catch (e) {
@@ -219,7 +219,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         if (ext === 'pdf') {
           // Dynamically require pdf-parse to bypass strict TS ESM checks for this CommonJS lib
           const pdfParse = require("pdf-parse");
-          
+
           const dataBuffer = await readFile(fpath);
           const data = await pdfParse(dataBuffer);
           return { content: data.text, metadata: data.info };
@@ -251,7 +251,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         notifier.notify({
           title: title,
           message: message,
-          sound: true, 
+          sound: true,
           wait: false
         });
         return { success: true, message: "Notification sent." };
@@ -271,7 +271,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
       },
       implementation: async ({ db_path, query }) => {
         const fpath = validatePath(currentWorkingDirectory, db_path);
-        
+
         // Safety: Attempt to block write operations (naive check)
         if (/^\s*(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|REPLACE)\b/i.test(query)) {
           return { error: "Only SELECT/read queries are allowed for safety." };
@@ -326,12 +326,12 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
       }
 
       try {
-        const child = spawn(command, { 
-          shell: true, 
+        const child = spawn(command, {
+          shell: true,
           cwd: currentWorkingDirectory,
-          timeout: 60000 
+          timeout: 60000
         });
-        
+
         let stdout = "";
         let stderr = "";
         child.stdout.on("data", d => stdout += d);
@@ -339,7 +339,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
 
         await new Promise((resolve) => child.on("close", resolve));
 
-        return { 
+        return {
           tool: command,
           type,
           report: (stdout + stderr).substring(0, 10000) // Limit size
@@ -829,12 +829,12 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         }
 
         const regex = new RegExp(pattern);
-        
+
         // Safety check for ReDoS
         const start = Date.now();
         regex.test("safe_test_string_for_redos_check_1234567890_safe_test_string_for_redos_check_1234567890");
         if (Date.now() - start > 100) {
-           return { error: "Pattern is too complex or slow (ReDoS protection)." };
+          return { error: "Pattern is too complex or slow (ReDoS protection)." };
         }
 
         const files = await readdir(currentWorkingDirectory);
@@ -877,7 +877,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         // Escaping for AppleScript is tricky, simple approach:
         const safeCmd = command.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
         const safeCwd = currentWorkingDirectory.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-        
+
         const appleScript = `
           tell application "Terminal"
             do script "cd \\"${safeCwd}\\" && ${safeCmd}"
@@ -891,21 +891,21 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         // Wrap command in single quotes for bash -c
         const safeCwd = currentWorkingDirectory.replace(/'/g, "'\\''");
         const safeCmd = command.replace(/'/g, "'\\''");
-        
+
         const bashScript = `cd '${safeCwd}' && ${safeCmd}; bash`;
-        
+
         // spawn directly, don't use sh -c
         const child = spawn("x-terminal-emulator", ["-e", "bash", "-c", bashScript], {
           detached: true,
           stdio: "ignore",
         });
-        
+
         child.on("error", (e) => {
-             // Fallback to gnome-terminal if x-terminal-emulator fails
-             const child2 = spawn("gnome-terminal", ["--", "bash", "-c", bashScript], {
-                 detached: true, stdio: "ignore"
-             });
-             child2.unref();
+          // Fallback to gnome-terminal if x-terminal-emulator fails
+          const child2 = spawn("gnome-terminal", ["--", "bash", "-c", bashScript], {
+            detached: true, stdio: "ignore"
+          });
+          child2.unref();
         });
         child.unref();
       }
@@ -983,7 +983,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             const page = await browser.newPage();
             // Use the HTML-only version for easier scraping/less JS blocking
             await page.goto(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`, { waitUntil: 'networkidle2', timeout: 15000 });
-            
+
             const extracted = await page.evaluate(() => {
               const items = document.querySelectorAll('.result');
               const data = [];
@@ -1014,7 +1014,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           try {
             const page = await browser.newPage();
             await page.goto(`https://www.google.com/search?q=${encodeURIComponent(q)}`, { waitUntil: 'networkidle2', timeout: 15000 });
-            
+
             const extracted = await page.evaluate(() => {
               const items = document.querySelectorAll('div.g');
               const data = [];
@@ -1046,7 +1046,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           try {
             const page = await browser.newPage();
             await page.goto(`https://www.bing.com/search?q=${encodeURIComponent(q)}`, { waitUntil: 'networkidle2', timeout: 15000 });
-            
+
             const extracted = await page.evaluate(() => {
               const items = document.querySelectorAll('li.b_algo');
               const data = [];
@@ -1095,17 +1095,17 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
       } else {
         // Fallback Chain
         const chain: Array<keyof typeof searchFunctions> = ["duckduckgo-api", "duckduckgo-html", "google", "bing"];
-        
+
         for (let i = 0; i < chain.length; i++) {
           const providerKey = chain[i];
-          const nextProvider = chain[i+1];
-          
+          const nextProvider = chain[i + 1];
+
           try {
             logs.push(`[Fallback Chain] Attempting ${providerKey}...`);
             const pResults = await searchFunctions[providerKey](query);
             results.push(...pResults);
             logs.push(`[Fallback Chain] Success: ${providerKey} found ${pResults.length} results. Stopping chain.`);
-            break; 
+            break;
           } catch (e) {
             const errMsg = e instanceof Error ? e.message : String(e);
             errors.push(`${providerKey}: ${errMsg}`);
@@ -1197,9 +1197,16 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         const titleMatch = text.match(/<title[^>]*>([^<]+)<\/title>/i);
         if (titleMatch) result.title = titleMatch[1];
 
-        // Cleaning
-        text = text.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
-        text = text.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "");
+        // Cleaning - Use iterative stripping to prevent reassembly attacks (CodeQL fix)
+        // Remove dangerous tags iteratively until none remain
+        let previousLength;
+        do {
+          previousLength = text.length;
+          text = text.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
+          text = text.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "");
+        } while (text.length < previousLength);
+
+        // Remove other structural tags (single pass is safe for these)
         text = text.replace(/<nav\b[^>]*>[\s\S]*?<\/nav>/gi, "");
         text = text.replace(/<footer\b[^>]*>[\s\S]*?<\/footer>/gi, "");
         text = text.replace(/<header\b[^>]*>[\s\S]*?<\/header>/gi, "");
@@ -1207,8 +1214,15 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         text = text.replace(/<\/div>/gi, "\n");
         text = text.replace(/<\/p>/gi, "\n");
         text = text.replace(/<br\s*\/?>/gi, "\n");
-        text = text.replace(/<[^>]+>/g, "");
-        text = text.replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"');
+
+        // Iteratively strip remaining tags to prevent reassembly
+        do {
+          previousLength = text.length;
+          text = text.replace(/<[^>]+>/g, "");
+        } while (text.length < previousLength);
+
+        // Decode HTML entities - decode &lt;/&gt; FIRST, then &amp; LAST (CodeQL fix for double-escaping)
+        text = text.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&nbsp;/g, " ").replace(/&amp;/g, "&");
         text = text.replace(/[ \t]+/g, ' ').replace(/\n\s*\n/g, "\n\n").trim();
 
         result.content = text.substring(0, 40000) + (text.length > 40000 ? "... (truncated)" : "");
@@ -1239,9 +1253,14 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         }
         let text = await response.text();
 
-        // 2. Clean content to get main text
-        text = text.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
-        text = text.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "");
+        // 2. Clean content to get main text - Use iterative stripping (CodeQL fix)
+        let previousLength;
+        do {
+          previousLength = text.length;
+          text = text.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
+          text = text.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "");
+        } while (text.length < previousLength);
+
         text = text.replace(/<nav\b[^>]*>[\s\S]*?<\/nav>/gi, "");
         text = text.replace(/<footer\b[^>]*>[\s\S]*?<\/footer>/gi, "");
         text = text.replace(/<header\b[^>]*>[\s\S]*?<\/header>/gi, "");
@@ -1249,8 +1268,15 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         text = text.replace(/<\/div>/gi, "\n");
         text = text.replace(/<\/p>/gi, "\n");
         text = text.replace(/<br\s*\/?>/gi, "\n");
-        text = text.replace(/<[^>]+>/g, "");
-        text = text.replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"');
+
+        // Iteratively strip remaining tags to prevent reassembly
+        do {
+          previousLength = text.length;
+          text = text.replace(/<[^>]+>/g, "");
+        } while (text.length < previousLength);
+
+        // Decode HTML entities - decode &lt;/&gt; FIRST, then &amp; LAST (CodeQL fix)
+        text = text.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&nbsp;/g, " ").replace(/&amp;/g, "&");
         text = text.replace(/[ \t]+/g, ' ').replace(/\n\s*\n/g, "\n\n").trim();
 
         if (text.length === 0) {
@@ -1493,7 +1519,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         command = "xdg-open";
         args = [targetToOpen];
       }
-
+      // lgtm[js/shell-command-constructed-from-input] - command is hardcoded based on platform, not user input
       const child = spawn(command, args, { stdio: 'ignore', detached: true });
       child.unref();
 
@@ -1527,7 +1553,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         command = "xdg-open";
         args = [filePath];
       }
-
+      // lgtm[js/shell-command-constructed-from-input] - command is hardcoded based on platform, not user input
       const child = spawn(command, args, { stdio: 'ignore', detached: true });
       child.unref();
 
@@ -2014,7 +2040,7 @@ Always assume relative paths are from this directory.`;
                     } else if (toolCall.tool === "delete_files_by_pattern" && toolCall.args?.pattern) {
                       if (toolCall.args.pattern.length > 100) throw new Error("Pattern too complex");
                       const regex = new RegExp(toolCall.args.pattern);
-                      
+
                       // ReDoS check
                       const start = Date.now();
                       regex.test("safe_test_string_for_redos_check_1234567890_safe_test_string_for_redos_check_1234567890");

@@ -7,6 +7,7 @@ This project is a plugin for [LM Studio](https://lmstudio.ai/) that provides a r
 ## ? Key Features
 
 ### ? File System Mastery
+
 - **Full Control:** Create, read, update, delete, move, and copy files.
 - **Safe & Secure:** All operations are sandboxed to your workspace directory to prevent path traversal attacks.
 - **Smart Updates:** Use `replace_text_in_file` to make surgical edits instead of rewriting large files.
@@ -14,22 +15,26 @@ This project is a plugin for [LM Studio](https://lmstudio.ai/) that provides a r
 - **Cleanup:** Use `delete_files_by_pattern` to wipe temporary files instantly.
 
 ### ? Recent Updates
+
 - **Smart Context Injection:** `subagent_docs.md` is automatically loaded into the context, ensuring the Main Agent understands how to delegate effectively.
 - **Enhanced Reporting:** Fixed file path reporting in `consult_secondary_agent` and clarified "Hidden Code" success messages.
 - **Project Tracking:** Sub-agents now enforce the creation and maintenance of `beledarian_info.md` to track project state.
 - **Strict Naming:** Improved instructions to ensure sub-agents use correct file extensions (e.g., `.json` vs `.js`).
 
 ### ? Autonomous Agents
+
 - **Secondary Agent:** Delegate complex tasks (coding, summarization) to a second local model/server.
 - **Auto-Save:** When the sub-agent generates code, the system **automatically detects and saves it** to your disk. No more copy-pasting!
 - **Auto-Debug:** (Optional) Triggers a "Reviewer" agent to analyze generated code and fix bugs automatically before returning the result.
 - **Project Context:** Agents can read `beledarian_info.md` to understand your project's history.
 
 ### ? Code Execution
+
 - **Sandboxed:** Run JavaScript (Deno) and Python code.
 - **Terminal:** Execute shell commands or open real terminal windows for interactive tasks.
 
 ### ? Web & RAG
+
 - **Research:** Search DuckDuckGo, Wikipedia, or fetch raw web content.
 - **Web RAG:** Chat with website content.
 - **Local RAG:** Semantic search over your workspace files (`rag_local_files`).
@@ -51,20 +56,26 @@ Alternatively, you can install it manually for development purposes.
 
 If you want to contribute to the development of this plugin, you can follow these steps:
 
-1.  **Clone the repository:**
+1. **Clone the repository:**
+
     ```bash
     git clone https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox.git
     cd Beledarians_LM_Studio_Toolbox
     ```
-2.  **Install dependencies:**
+
+2. **Install dependencies:**
+
     ```bash
     npm install
     ```
-3.  **Run in development mode:**
+
+3. **Run in development mode:**
     From within the project directory, run the following command:
+
     ```bash
     lms dev
     ```
+
     This will start the plugin in development mode. LM Studio should automatically pick it up. Any changes you make to the source code will cause the plugin to automatically reload.
 
 ## ⚙️ Configuration
@@ -81,6 +92,7 @@ Access these settings in the LM Studio "Plugins" tab:
 ## ? Available Tools
 
 ### File System
+
 - `list_directory`, `change_directory`, `make_directory`
 - `read_file`, `save_file` (supports batch), `delete_path`
 - `replace_text_in_file`: Precision editing.
@@ -88,18 +100,22 @@ Access these settings in the LM Studio "Plugins" tab:
 - `move_file`, `copy_file`, `find_files`, `get_file_metadata`
 
 ### Agent
+
 - `consult_secondary_agent`: The powerhouse tool. Delegates tasks, handles file creation, and manages sub-agent loops.
 
 ### Web
+
 - `duckduckgo_search`, `wikipedia_search`
 - `fetch_web_content`, `rag_web_content`
 - `browser_open_page` (Puppeteer)
 
 ### Execution
+
 - `run_javascript`, `run_python`
 - `execute_command` (Background), `run_in_terminal` (Interactive)
 
 ### Utils
+
 - `rag_local_files`: Search your code.
 - `save_memory`: Long-term memory.
 - `get_system_info`, `read_clipboard`, `write_clipboard`
