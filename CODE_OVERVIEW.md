@@ -39,13 +39,13 @@ Ensures the AI is aware of its capabilities and role. It reads `SUB_AGENT_INSTRU
 
 ```mermaid
 graph TD
-    User[User Input] --> LMStudio[LM Studio Host]
-    LMStudio --> Plugin[Plugin (index.ts)]
-    Plugin --> Pre[Prompt Preprocessor]
-    Pre --> Context[LLM Context]
-    Plugin --> Tools[Tools Provider]
-    Tools --> FS[File System]
-    Tools --> Web[Web Search/Scraping]
-    Tools --> Agent[Secondary Agent]
-    Agent --> SubLLM[Sub-Model execution]
+    User["User Input"] --> LMStudio["LM Studio Host"]
+    LMStudio --> Plugin["Plugin (index.ts)"]
+    Plugin --> Pre["Prompt Preprocessor"]
+    Pre --> Context["LLM Context"]
+    Plugin --> Tools["Tools Provider"]
+    Tools --> FS["File System"]
+    Tools --> Web["Web Search/Scraping"]
+    Tools --> Agent["Secondary Agent"]
+    Agent --> SubLLM["Sub-Model execution"]
 ```
