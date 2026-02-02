@@ -2,6 +2,14 @@
 
 First off, thank you for considering contributing to this project! It's people like you that make the open-source community such an amazing place to learn, inspire, and create.
 
+
+## 🐛 Reporting Bugs
+
+If you find a bug, please create an Issue on GitHub. Include:
+* A clear title and description.
+* Steps to reproduce the bug.
+* The expected behavior vs. actual behavior.
+
 ## 🛠 Getting Started
 
 1.  **Fork the repository** on GitHub.
@@ -43,12 +51,5 @@ Since this project uses **TypeScript**, please adhere to the following:
 * **Strict Typing:** Avoid using `any` whenever possible. Define interfaces/types for your data structures.
 * **Clarity:** Variable and function names should be self-explanatory.
 * **Formatting:** If available, run the linter/formatter before committing.
-
-## 🐛 Reporting Bugs
-
-If you find a bug, please create an Issue on GitHub. Include:
-* A clear title and description.
-* Steps to reproduce the bug.
-* The expected behavior vs. actual behavior.
 
 Thank you for your contributions!
