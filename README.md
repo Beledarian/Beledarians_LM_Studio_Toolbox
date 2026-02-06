@@ -4,9 +4,9 @@
 
 This project is a plugin for [LM Studio](https://lmstudio.ai/) that provides a rich set of tools to a large language model. It acts as a bridge between the LLM and your local environment, enabling autonomous coding, research, and file management.
 
-## ? Key Features
+## Key Features
 
-### ? File System Mastery
+### File System Mastery
 
 - **Full Control:** Create, read, update, delete, move, and copy files.
 - **Safe & Secure:** All operations are sandboxed to your workspace directory to prevent path traversal attacks.
@@ -14,37 +14,40 @@ This project is a plugin for [LM Studio](https://lmstudio.ai/) that provides a r
 - **Batch Processing:** `save_file` supports creating multiple files in one go.
 - **Cleanup:** Use `delete_files_by_pattern` to wipe temporary files instantly.
 
-### ? Recent Updates
+### Recent Updates
 
 - **Smart Context Injection:** `subagent_docs.md` is automatically loaded into the context, ensuring the Main Agent understands how to delegate effectively.
 - **Enhanced Reporting:** Fixed file path reporting in `consult_secondary_agent` and clarified "Hidden Code" success messages.
 - **Project Tracking:** Sub-agents now enforce the creation and maintenance of `beledarian_info.md` to track project state.
 - **Strict Naming:** Improved instructions to ensure sub-agents use correct file extensions (e.g., `.json` vs `.js`).
 
-### ? Autonomous Agents
+### Autonomous Agents
 
 - **Secondary Agent:** Delegate complex tasks (coding, summarization) to a second local model/server.
 - **Auto-Save:** When the sub-agent generates code, the system **automatically detects and saves it** to your disk. No more copy-pasting!
 - **Auto-Debug:** (Optional) Triggers a "Reviewer" agent to analyze generated code and fix bugs automatically before returning the result.
 - **Project Context:** Agents can read `beledarian_info.md` to understand your project's history.
 
-### ? Code Execution
+### Code Execution
 
 - **Sandboxed:** Run JavaScript (Deno) and Python code.
 - **Terminal:** Execute shell commands or open real terminal windows for interactive tasks.
 
-### ? Web & RAG
+### Web & RAG
 
 - **Research:** Search DuckDuckGo, Wikipedia, or fetch raw web content.
 - **Web RAG:** Chat with website content.
 - **Local RAG:** Semantic search over your workspace files (`rag_local_files`).
 
-## ? Requirements
+## Requirements
 
 - [Node.js](https://nodejs.org/) (v18+)
 - [LM Studio](https://lmstudio.ai/) (v0.3.0+)
 
-## ? Installation
+## Related Tools
+* **[mcp-local-memory](https://github.com/Beledarian/mcp-local-memory):** A lightweight, local memory server for AI agents (Graph + Vector search).
+
+## Installation
 
 The plugin can be installed using the following link:
 
@@ -78,7 +81,7 @@ If you want to contribute to the development of this plugin, you can follow thes
 
     This will start the plugin in development mode. LM Studio should automatically pick it up. Any changes you make to the source code will cause the plugin to automatically reload.
 
-## ⚙️ Configuration
+## Configuration
 
 Access these settings in the LM Studio "Plugins" tab:
 
@@ -89,7 +92,7 @@ Access these settings in the LM Studio "Plugins" tab:
 - **Show Full Code Output:** Toggle whether to display the full code in chat or hide it for brevity (files are still saved).
 - **Safety:** Enable/Disable "Allow Code Execution" for Python/JS/Shell.
 
-## ? Available Tools
+## Available Tools
 
 ### File System
 
@@ -120,6 +123,6 @@ Access these settings in the LM Studio "Plugins" tab:
 - `save_memory`: Long-term memory.
 - `get_system_info`, `read_clipboard`, `write_clipboard`
 
-## ? Developer Guide
+## Developer Guide
 
 See [CODE_OVERVIEW.md](./CODE_OVERVIEW.md) for architectural details.
