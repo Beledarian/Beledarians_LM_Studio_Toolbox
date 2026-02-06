@@ -44,8 +44,8 @@ This project is a plugin for [LM Studio](https://lmstudio.ai/) that provides a r
 - [Node.js](https://nodejs.org/) (v18+)
 - [LM Studio](https://lmstudio.ai/) (v0.3.0+)
 
-## Related Tools
-* **[mcp-local-memory](https://github.com/Beledarian/mcp-local-memory):** A lightweight, local memory server for AI agents (Graph + Vector search).
+> **💡 Tip:** Need persistent long-term memory for your agent?
+> Check out my other project: **[Local Memory MCP](https://github.com/Beledarian/mcp-local-memory)** – A privacy-first memory server with knowledge graph support.
 
 ## Installation
 
