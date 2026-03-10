@@ -33,6 +33,9 @@ This project is a plugin for [LM Studio](https://lmstudio.ai/) that provides a r
 - **Sandboxed:** Run JavaScript (Deno) and Python code.
 - **Terminal:** Execute shell commands or open real terminal windows for interactive tasks.
 
+> [!WARNING]
+> Enabling shell or terminal execution allows the model to run arbitrary commands on your system. If enabled, the model may be able to modify files and escape the sandbox environment.
+
 ### Web & RAG
 
 - **Research:** Search DuckDuckGo, Wikipedia, or fetch raw web content.
