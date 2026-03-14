@@ -1,131 +1,106 @@
-# Beledarian's LM Studio Tools
+# Beledarian's LM Studio Tools v2
 
 [![GitHub](https://img.shields.io/badge/GitHub-Repository-blue?logo=github)](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox)
 
-This project is a plugin for [LM Studio](https://lmstudio.ai/) that provides a rich set of tools to a large language model. It acts as a bridge between the LLM and your local environment, enabling autonomous coding, research, and file management.
+A streamlined tool suite for [LM Studio](https://lmstudio.ai/) AI agents. Provides file management, code execution, web search, and system utilities through a clean, minimal API that local LLMs can reliably invoke.
 
-## Key Features
+## Why v2?
 
-### File System Mastery
+The original tool suite had **35+ tools** with verbose descriptions, complex optional parameters, a prompt-injection system, and a fragile sub-agent framework. Local models frequently failed to call tools because of:
 
-- **Full Control:** Create, read, update, delete, move, and copy files.
-- **Safe & Secure:** All operations are sandboxed to your workspace directory to prevent path traversal attacks.
-- **Smart Updates:** Use `replace_text_in_file` to make surgical edits instead of rewriting large files.
-- **Batch Processing:** `save_file` supports creating multiple files in one go.
-- **Cleanup:** Use `delete_files_by_pattern` to wipe temporary files instantly.
+- **Tool overload** -- too many tools overwhelm smaller models' ability to select and format calls correctly
+- **Verbose descriptions** -- multi-line descriptions waste context window and create ambiguity
+- **Complex schemas** -- deeply nested optional parameters cause format errors
+- **Prompt injection** -- injecting a separate "tools documentation" block conflicted with the SDK's native tool descriptions
+- **Documentation mismatches** -- injected docs referenced tools that didn't exist (e.g., `search_file_content`, `duckduckgo_search`)
+- **Heavy dependencies** -- puppeteer, pdf-parse, mammoth, better-sqlite3, simple-git, node-notifier added install failures and bloat
+- **Fragile sub-agent** -- regex-based tool-call parsing with 3+ JSON format fallbacks
 
-### Recent Updates
+v2 fixes all of this: **16 focused tools**, one-sentence descriptions, simple required parameters, zero prompt injection, and only 2 runtime dependencies (`duck-duck-scrape` and `zod`).
 
-- **Smart Context Injection:** `subagent_docs.md` is automatically loaded into the context, ensuring the Main Agent understands how to delegate effectively.
-- **Enhanced Reporting:** Fixed file path reporting in `consult_secondary_agent` and clarified "Hidden Code" success messages.
-- **Project Tracking:** Sub-agents now enforce the creation and maintenance of `beledarian_info.md` to track project state.
-- **Strict Naming:** Improved instructions to ensure sub-agents use correct file extensions (e.g., `.json` vs `.js`).
+## Tools
 
-### Autonomous Agents
+### File System (always available)
 
-- **Secondary Agent:** Delegate complex tasks (coding, summarization) to a second local model/server.
-- **Auto-Save:** When the sub-agent generates code, the system **automatically detects and saves it** to your disk. No more copy-pasting!
-- **Auto-Debug:** (Optional) Triggers a "Reviewer" agent to analyze generated code and fix bugs automatically before returning the result.
-- **Project Context:** Agents can read `beledarian_info.md` to understand your project's history.
+| Tool | Description |
+|------|-------------|
+| `list_directory` | List files and folders |
+| `read_file` | Read text file content |
+| `write_file` | Create or overwrite a file |
+| `edit_file` | Replace exact text in a file |
+| `delete_file` | Delete a file or directory |
+| `find_files` | Search for files by name |
+| `search_in_files` | Grep-like content search |
+| `move_file` | Move or rename |
+| `copy_file` | Copy a file |
+| `file_info` | Get file metadata |
 
-### Code Execution
+### Execution (gated by config)
 
-- **Sandboxed:** Run JavaScript (Deno) and Python code.
-- **Terminal:** Execute shell commands or open real terminal windows for interactive tasks.
+| Tool | Description |
+|------|-------------|
+| `run_command` | Execute a shell command |
+| `run_javascript` | Run JS/TS in sandboxed Deno |
+| `run_python` | Run a Python script |
 
-> [!WARNING]
-> Enabling shell or terminal execution allows the model to run arbitrary commands on your system. If enabled, the model may be able to modify files and escape the sandbox environment.
+### Web (always available)
 
-### Web & RAG
+| Tool | Description |
+|------|-------------|
+| `web_search` | DuckDuckGo search |
+| `fetch_url` | Fetch and extract webpage text |
 
-- **Research:** Search DuckDuckGo, Wikipedia, or fetch raw web content.
-- **Web RAG:** Chat with website content.
-- **Local RAG:** Semantic search over your workspace files (`rag_local_files`).
+### System
+
+| Tool | Description |
+|------|-------------|
+| `system_info` | OS, CPU, memory info |
 
 ## Requirements
 
 - [Node.js](https://nodejs.org/) (v18+)
 - [LM Studio](https://lmstudio.ai/) (v0.3.0+)
 
-> **💡 Tip:** Need persistent long-term memory for your agent?
-> Check out my other project: **[Local Memory MCP](https://github.com/Beledarian/mcp-local-memory)** – A privacy-first memory server with knowledge graph support.
-
 ## Installation
 
-The plugin can be installed using the following link:
+Install from the LM Studio Hub:
 
 [https://lmstudio.ai/beledarian/beledarians-lm-studio-tools](https://lmstudio.ai/beledarian/beledarians-lm-studio-tools)
 
-Alternatively, you can install it manually for development purposes.
-
 ### Development
 
-If you want to contribute to the development of this plugin, you can follow these steps:
-
-1. **Clone the repository:**
-
-    ```bash
-    git clone https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox.git
-    cd Beledarians_LM_Studio_Toolbox
-    ```
-
-2. **Install dependencies:**
-
-    ```bash
-    npm install
-    ```
-
-3. **Run in development mode:**
-    From within the project directory, run the following command:
-
-    ```bash
-    lms dev
-    ```
-
-    This will start the plugin in development mode. LM Studio should automatically pick it up. Any changes you make to the source code will cause the plugin to automatically reload.
+```bash
+git clone https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox.git
+cd Beledarians_LM_Studio_Toolbox
+npm install
+lms dev
+```
 
 ## Configuration
 
-Access these settings in the LM Studio "Plugins" tab:
+Access settings in the LM Studio "Plugins" tab:
 
-- **Enable Secondary Agent:** Unlock the power of sub-agents.
-- **Sub-Agent Profiles:** Custom prompts for "Coder", "Reviewer", etc.
-- **Auto-Debug Mode:** Automatically review sub-agent code.
-- **Sub-Agent Auto-Save:** Toggle automatic file saving (Default: On).
-- **Show Full Code Output:** Toggle whether to display the full code in chat or hide it for brevity (files are still saved).
-- **Safety:** Enable/Disable "Allow Code Execution" for Python/JS/Shell.
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Allow Shell Commands | Off | Enable `run_command` |
+| Allow JavaScript Execution | Off | Enable `run_javascript` (Deno sandbox) |
+| Allow Python Execution | Off | Enable `run_python` |
 
-## Available Tools
+> **Warning:** Enabling execution tools allows the model to run commands on your machine.
 
-### File System
+## Architecture
 
-- `list_directory`, `change_directory`, `make_directory`
-- `read_file`, `save_file` (supports batch), `delete_path`
-- `replace_text_in_file`: Precision editing.
-- `delete_files_by_pattern`: Regex-based cleanup.
-- `move_file`, `copy_file`, `find_files`, `get_file_metadata`
+```
+src/
+  index.ts          -- Plugin entry point (8 lines)
+  config.ts         -- Configuration schematics (17 lines)
+  toolsProvider.ts  -- All tool definitions (~430 lines)
+  utils.ts          -- Path validation & process runner (~60 lines)
+```
 
-### Agent
+No prompt preprocessor. No state manager. No sub-agent framework.
+The SDK's native tool descriptions are all the model needs.
 
-- `consult_secondary_agent`: The powerhouse tool. Delegates tasks, handles file creation, and manages sub-agent loops.
+## License
 
-### Web
-
-- `duckduckgo_search`, `wikipedia_search`
-- `fetch_web_content`, `rag_web_content`
-- `browser_open_page` (Puppeteer)
-
-### Execution
-
-- `run_javascript`, `run_python`
-- `execute_command` (Background), `run_in_terminal` (Interactive)
-
-### Utils
-
-- `rag_local_files`: Search your code.
-- `save_memory`: Long-term memory.
-- `get_system_info`, `read_clipboard`, `write_clipboard`
-
-## Developer Guide
-
-See [CODE_OVERVIEW.md](./CODE_OVERVIEW.md) for architectural details.
+ISC
