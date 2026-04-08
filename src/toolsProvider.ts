@@ -2522,7 +2522,7 @@ Always assume relative paths are from this directory.`;
                             const buildSelector = (el: Element) => {
                               if ((el as HTMLElement).id) return `#${(el as HTMLElement).id}`;
                               const name = el.getAttribute("name");
-                              if (name) return `${el.tagName.toLowerCase()}[name="${name.replace(/"/g, '\\"')}"]`;
+                              if (name) return `${el.tagName.toLowerCase()}[name="${CSS.escape(name)}"]`;
                               return `${el.tagName.toLowerCase()}${classSelector(el)}`;
                             };
                             for (const node of nodes) {
