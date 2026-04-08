@@ -1,5 +1,13 @@
 .lmstudio
 node_modules
+dist/
 fix-bugs.js
 fix-bugs-v2.js
 test_security_fixes.ts
+
+# Sub-agent test files
+subagent_test/
+subagent_test.ts
+subagent_test.js
+test_results_*.json
+test_output_*.log

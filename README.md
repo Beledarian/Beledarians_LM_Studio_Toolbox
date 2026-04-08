@@ -4,6 +4,9 @@
 
 This project is a plugin for [LM Studio](https://lmstudio.ai/) that provides a rich set of tools to a large language model. It acts as a bridge between the LLM and your local environment, enabling autonomous coding, research, and file management.
 
+> [!IMPORTANT]
+> **LM Studio does NOT support automatic updates.** If you encounter issues, please try manually updating first by removing the current version and re-downloading from the plugin store. The store may show "already installed" even if your version is outdated.
+
 ## Key Features
 
 ### File System Mastery
@@ -16,10 +19,14 @@ This project is a plugin for [LM Studio](https://lmstudio.ai/) that provides a r
 
 ### Recent Updates
 
-- **Smart Context Injection:** `subagent_docs.md` is automatically loaded into the context, ensuring the Main Agent understands how to delegate effectively.
-- **Enhanced Reporting:** Fixed file path reporting in `consult_secondary_agent` and clarified "Hidden Code" success messages.
-- **Project Tracking:** Sub-agents now enforce the creation and maintenance of `beledarian_info.md` to track project state.
-- **Strict Naming:** Improved instructions to ensure sub-agents use correct file extensions (e.g., `.json` vs `.js`).
+- **Gemma 4 Compatibility:** Fixed sub-agent tool call parsing for models using `parameters` format (e.g., Gemma 4)
+- **Debug Logging:** Added diagnostic logging for sub-agent tool call parsing
+
+[📋 View Full Changelog](#changelog)
+
+> **Encountering issues?** Feel free to [submit them on GitHub](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox/issues).
+>
+> **Find this project helpful?** Consider [giving it a ⭐ on GitHub](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox) or contributing! Thank you for using the toolbox.
 
 ### Autonomous Agents
 
@@ -129,3 +136,20 @@ Access these settings in the LM Studio "Plugins" tab:
 ## Developer Guide
 
 See [CODE_OVERVIEW.md](./CODE_OVERVIEW.md) for architectural details.
+
+---
+
+## Changelog
+
+### v1.1.0 (2026-04-08)
+**Sub-Agent Compatibility Improvements**
+
+- **Fixed:** Gemma 4 and other models using `{"tool": "...", "parameters": {...}}` format now work correctly with `consult_secondary_agent`
+- **Added:** Debug logging for sub-agent tool call parsing to aid troubleshooting
+- **Added:** Support for direct `{file_name, content}` JSON format from some models
+
+### Previous Updates
+- **Smart Context Injection:** `subagent_docs.md` is automatically loaded into the context
+- **Enhanced Reporting:** Fixed file path reporting in `consult_secondary_agent`
+- **Project Tracking:** Sub-agents enforce creation of `beledarian_info.md`
+- **Strict Naming:** Improved instructions for correct file extensions

@@ -1948,9 +1948,21 @@ Always assume relative paths are from this directory.`;
                 if (jsonMatch) {
                   try {
                     const parsed = JSON.parse(jsonMatch[0]);
+                    console.log(`[Sub-Agent] Parsed JSON:`, JSON.stringify(parsed).substring(0, 200));
                     // Primary format: {"tool": "tool_name", "args": {...}}
                     if (parsed.tool && parsed.args) {
                       toolCall = parsed;
+                    }
+                    // Gemma format: {"tool": "tool_name", "parameters": {...}}
+                    else if (parsed.tool && parsed.parameters) {
+                      console.log(`[Sub-Agent] Gemma format detected (tool + parameters)`);
+                      let args = parsed.parameters;
+                      // Map Gemma's 'path' to our expected 'file_name'
+                      if (parsed.tool === "save_file") {
+                        if (args.path && !args.file_name) args.file_name = args.path;
+                        if (args.data && !args.content) args.content = args.data;
+                      }
+                      toolCall = { tool: parsed.tool, args: args };
                     }
                     // Secondary format: {"name": "tool_name", "arguments": {...}} - commonly seen from some models
                     else if (parsed.name && parsed.arguments) {
@@ -1985,11 +1997,20 @@ Always assume relative paths are from this directory.`;
                           if (args.data && !args.content) args.content = args.data;
                         }
                         toolCall = { tool: toolName, args: args };
+                      } else {
+                        // NEW: Check if the JSON itself contains file_name/content directly (some models)
+                        if (parsed.file_name && parsed.content) {
+                          console.log(`[Sub-Agent] Direct save_file format detected`);
+                          toolCall = { tool: "save_file", args: parsed };
+                        }
                       }
                     }
                   } catch (e) {
                     // JSON parsing failed, toolCall remains null
+                    console.log(`[Sub-Agent] JSON parse error:`, e);
                   }
+                } else {
+                  console.log(`[Sub-Agent] No JSON found in response (first 200 chars):`, trimmed.substring(0, 200));
                 }
               } catch (e) { }
 
