@@ -1829,7 +1829,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             const buildSelector = (el: Element) => {
               if ((el as HTMLElement).id) return `#${(el as HTMLElement).id}`;
               const name = el.getAttribute("name");
-              if (name) return `${el.tagName.toLowerCase()}[name="${name.replace(/"/g, '\\"')}"]`;
+              if (name) return `${el.tagName.toLowerCase()}[name="${name.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"]`;
               return `${el.tagName.toLowerCase()}${classSelector(el)}`;
             };
 
