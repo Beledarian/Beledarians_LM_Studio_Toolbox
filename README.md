@@ -30,7 +30,7 @@ This project is a plugin for [LM Studio](https://lmstudio.ai/) that provides a r
 
 ### Autonomous Agents
 
-- **Secondary Agent:** Delegate complex tasks (coding, summarization) to a second local model/server.
+- **Secondary Agent:** Delegate complex tasks (coding, summarization) to a second local model/server with support for the main model already used and loaded by LM Studio!
 - **Auto-Save:** When the sub-agent generates code, the system **automatically detects and saves it** to your disk. No more copy-pasting!
 - **Auto-Debug:** (Optional) Triggers a "Reviewer" agent to analyze generated code and fix bugs automatically before returning the result.
 - **Project Context:** Agents can read `beledarian_info.md` to understand your project's history.
