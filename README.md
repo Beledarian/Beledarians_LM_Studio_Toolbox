@@ -5,7 +5,7 @@
 This project is a plugin for [LM Studio](https://lmstudio.ai/) that provides a rich set of tools to a large language model. It acts as a bridge between the LLM and your local environment, enabling autonomous coding, research, and file management.
 
 > [!IMPORTANT]
-> **LM Studio does NOT support automatic updates.** If you encounter issues, please try manually updating first by removing the current version and re-downloading from the plugin store. The store may show "already installed" even if your version is outdated.
+> **LM Studio does NOT support automatic updates.** If you encounter issues, please try manually updating first by removing the current version and re-downloading from the [plugin website](https://lmstudio.ai/beledarian/beledarians-lm-studio-tools). LM Studio may show an "already installed" tooltip, even if your version is outdated.
 
 ## Key Features
 
