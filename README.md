@@ -19,8 +19,11 @@ This project is a plugin for [LM Studio](https://lmstudio.ai/) that provides a r
 
 ### Recent Updates
 
+- **v1.1.1 Browser Reliability:** Added robust click fallback handling for selectors like `a.Link--primary` when Puppeteer reports non-clickable nodes.
+- **v1.1.1 Navigation Context:** `browser_session_open` now returns full page text by default for better multi-step planning.
 - **Gemma 4 Compatibility:** Fixed sub-agent tool call parsing for models using `parameters` format (e.g., Gemma 4)
-- **Debug Logging:** Added diagnostic logging for sub-agent tool call parsing
+- **Advanced Browser Navigation:** Added persistent browser session tools with scripted actions, in-page fuzzy find, and URL-change notices
+- **Structured Sub-Agent Handoff:** Added explicit `handoff_message` support for relaying findings/research
 
 [📋 View Full Changelog](#changelog)
 
@@ -33,6 +36,7 @@ This project is a plugin for [LM Studio](https://lmstudio.ai/) that provides a r
 - **Secondary Agent:** Delegate complex tasks (coding, summarization) to a second local model/server with support for the main model already used and loaded by LM Studio!
 - **Auto-Save:** When the sub-agent generates code, the system **automatically detects and saves it** to your disk. No more copy-pasting!
 - **Auto-Debug:** (Optional) Triggers a "Reviewer" agent to analyze generated code and fix bugs automatically before returning the result.
+- **Structured Handoff:** Sub-agents can return a dedicated `handoff_message` for the main agent to relay findings/research.
 - **Project Context:** Agents can read `beledarian_info.md` to understand your project's history.
 
 ### Code Execution
@@ -46,6 +50,7 @@ This project is a plugin for [LM Studio](https://lmstudio.ai/) that provides a r
 ### Web & RAG
 
 - **Research:** Search DuckDuckGo, Wikipedia, or fetch raw web content.
+- **Advanced Browser Navigation:** Persistent `browser_session_open/control/close` flow for multi-step browsing and automation.
 - **Web RAG:** Chat with website content.
 - **Local RAG:** Semantic search over your workspace files (`rag_local_files`).
 
@@ -98,9 +103,11 @@ Access these settings in the LM Studio "Plugins" tab:
 - **Enable Secondary Agent:** Unlock the power of sub-agents.
 - **Sub-Agent Profiles:** Custom prompts for "Coder", "Reviewer", etc.
 - **Auto-Debug Mode:** Automatically review sub-agent code.
+- **Sub-Agent Debug Logging:** Toggle detailed sub-agent parsing logs for troubleshooting.
 - **Sub-Agent Auto-Save:** Toggle automatic file saving (Default: On).
 - **Show Full Code Output:** Toggle whether to display the full code in chat or hide it for brevity (files are still saved).
 - **Safety:** Enable/Disable "Allow Code Execution" for Python/JS/Shell.
+- **Browser Safety:** Browser automation for sub-agents requires all three toggles: `Allow Browser Control` + `Sub-Agent: Allow Web Search` + `Sub-Agent: Allow Browser Control`.
 
 ## Available Tools
 
@@ -111,6 +118,7 @@ Access these settings in the LM Studio "Plugins" tab:
 - `replace_text_in_file`: Precision editing.
 - `delete_files_by_pattern`: Regex-based cleanup.
 - `move_file`, `copy_file`, `find_files`, `get_file_metadata`
+- `fuzzy_find_local_files`: Levenshtein-based fuzzy file path/name search.
 
 ### Agent
 
@@ -118,9 +126,23 @@ Access these settings in the LM Studio "Plugins" tab:
 
 ### Web
 
-- `duckduckgo_search`, `wikipedia_search`
+- `web_search` (DuckDuckGo API + HTML fetch/browser fallback), `wikipedia_search`
 - `fetch_web_content`, `rag_web_content`
-- `browser_open_page` (Puppeteer)
+- `browser_session_open`, `browser_session_control`, `browser_session_close` (persistent page automation; preferred for multi-step navigation, with deduped page-text output unless `full_read=true`)
+- `browser_open_page` (stateless one-shot Puppeteer read)
+- Workaround tip: if selector-based click fails, use an `evaluate` action to click by text, then call with `full_read=true`.
+
+```json
+{
+  "actions": [
+    {
+      "type": "evaluate",
+      "script": "const link=[...document.querySelectorAll('a')].find(a=>a.textContent?.includes('LICENSE')); if(link) link.click();"
+    }
+  ],
+  "full_read": true
+}
+```
 
 ### Execution
 
@@ -141,11 +163,21 @@ See [CODE_OVERVIEW.md](./CODE_OVERVIEW.md) for architectural details.
 
 ## Changelog
 
+### v1.1.1 (2026-04-08)
+**Browser Reliability and Navigation Context**
+
+- **Fixed:** Browser action clicks now include a DOM-level fallback when Puppeteer reports "Node is either not clickable or not an Element"
+- **Improved:** Browser click actions now retry native click after ~300ms before falling back
+- **Added:** `browser_session_open` returns full page text by default (`include_page_text` defaults to true)
+- **Refined:** Multi-step routing guidance now prioritizes `browser_session_open -> browser_session_control -> browser_session_close`
+
 ### v1.1.0 (2026-04-08)
 **Sub-Agent Compatibility Improvements**
 
 - **Fixed:** Gemma 4 and other models using `{"tool": "...", "parameters": {...}}` format now work correctly with `consult_secondary_agent`
-- **Added:** Debug logging for sub-agent tool call parsing to aid troubleshooting
+- **Added:** Advanced browser navigation (`browser_session_open`, `browser_session_control`, `browser_session_close`) including in-page fuzzy find and URL-change notices
+- **Added:** Structured sub-agent handoff message support (`handoff_message`) for relay/summary workflows
+- **Added:** Enable Sub-Agent Debug Logging toggle in plugin settings
 - **Added:** Support for direct `{file_name, content}` JSON format from some models
 
 ### Previous Updates
