@@ -1296,33 +1296,16 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         const titleMatch = text.match(/<title[^>]*>([^<]+)<\/title>/i);
         if (titleMatch) result.title = titleMatch[1];
 
-        // Cleaning - Use iterative stripping to prevent reassembly attacks (CodeQL fix)
-        // Remove dangerous tags iteratively until none remain
-        let previousLength;
-        do {
-          previousLength = text.length;
-          text = text.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
-          text = text.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "");
-        } while (text.length < previousLength);
+        const { compile } = await import("html-to-text");
+        const compiledConvert = compile({
+          wordwrap: false,
+          selectors: [
+            { selector: "a", options: { ignoreHref: true } },
+            { selector: "img", format: "skip" },
+          ],
+        });
 
-        // Remove other structural tags (single pass is safe for these)
-        text = text.replace(/<nav\b[^>]*>[\s\S]*?<\/nav>/gi, "");
-        text = text.replace(/<footer\b[^>]*>[\s\S]*?<\/footer>/gi, "");
-        text = text.replace(/<header\b[^>]*>[\s\S]*?<\/header>/gi, "");
-        text = text.replace(/<aside\b[^>]*>[\s\S]*?<\/aside>/gi, "");
-        text = text.replace(/<\/div>/gi, "\n");
-        text = text.replace(/<\/p>/gi, "\n");
-        text = text.replace(/<br\s*\/?>/gi, "\n");
-
-        // Iteratively strip remaining tags to prevent reassembly
-        do {
-          previousLength = text.length;
-          text = text.replace(/<[^>]+>/g, "");
-        } while (text.length < previousLength);
-
-        // Decode HTML entities - decode &lt;/&gt; FIRST, then &amp; LAST (CodeQL fix for double-escaping)
-        text = text.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&nbsp;/g, " ").replace(/&amp;/g, "&");
-        text = text.replace(/[ \t]+/g, ' ').replace(/\n\s*\n/g, "\n\n").trim();
+        text = compiledConvert(text);
 
         result.content = text.substring(0, 40000) + (text.length > 40000 ? "... (truncated)" : "");
 
@@ -1352,31 +1335,16 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         }
         let text = await response.text();
 
-        // 2. Clean content to get main text - Use iterative stripping (CodeQL fix)
-        let previousLength;
-        do {
-          previousLength = text.length;
-          text = text.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
-          text = text.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "");
-        } while (text.length < previousLength);
+        const { compile } = await import("html-to-text");
+        const compiledConvert = compile({
+          wordwrap: false,
+          selectors: [
+            { selector: "a", options: { ignoreHref: true } },
+            { selector: "img", format: "skip" },
+          ],
+        });
 
-        text = text.replace(/<nav\b[^>]*>[\s\S]*?<\/nav>/gi, "");
-        text = text.replace(/<footer\b[^>]*>[\s\S]*?<\/footer>/gi, "");
-        text = text.replace(/<header\b[^>]*>[\s\S]*?<\/header>/gi, "");
-        text = text.replace(/<aside\b[^>]*>[\s\S]*?<\/aside>/gi, "");
-        text = text.replace(/<\/div>/gi, "\n");
-        text = text.replace(/<\/p>/gi, "\n");
-        text = text.replace(/<br\s*\/?>/gi, "\n");
-
-        // Iteratively strip remaining tags to prevent reassembly
-        do {
-          previousLength = text.length;
-          text = text.replace(/<[^>]+>/g, "");
-        } while (text.length < previousLength);
-
-        // Decode HTML entities - decode &lt;/&gt; FIRST, then &amp; LAST (CodeQL fix)
-        text = text.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&nbsp;/g, " ").replace(/&amp;/g, "&");
-        text = text.replace(/[ \t]+/g, ' ').replace(/\n\s*\n/g, "\n\n").trim();
+        text = compiledConvert(text);
 
         if (text.length === 0) {
           return { error: "Could not extract any text from the URL." };
@@ -1635,28 +1603,14 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
       target: z.string().describe("File path or URL"),
     },
     implementation: async ({ target }) => {
-      let command = "";
-      let args: string[] = [];
-
       // Resolve path if it's a file and not a URL
       let targetToOpen = target;
       if (!target.startsWith("http://") && !target.startsWith("https://")) {
         targetToOpen = validatePath(currentWorkingDirectory, target);
       }
 
-      if (process.platform === "win32") {
-        command = "cmd";
-        args = ["/c", "start", "", targetToOpen];
-      } else if (process.platform === "darwin") {
-        command = "open";
-        args = [targetToOpen];
-      } else {
-        command = "xdg-open";
-        args = [targetToOpen];
-      }
-      // lgtm[js/shell-command-constructed-from-input] - command is hardcoded based on platform, not user input
-      const child = spawn(command, args, { stdio: 'ignore', detached: true });
-      child.unref();
+      const open = (await import("open")).default;
+      await open(targetToOpen);
 
       return { success: true, message: `Opened ${targetToOpen}` };
     }
@@ -1676,21 +1630,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
       await writeFile(filePath, html_content, "utf-8");
 
       // Open it
-      let command = "";
-      let args: string[] = [];
-      if (process.platform === "win32") {
-        command = "cmd";
-        args = ["/c", "start", "", filePath];
-      } else if (process.platform === "darwin") {
-        command = "open";
-        args = [filePath];
-      } else {
-        command = "xdg-open";
-        args = [filePath];
-      }
-      // lgtm[js/shell-command-constructed-from-input] - command is hardcoded based on platform, not user input
-      const child = spawn(command, args, { stdio: 'ignore', detached: true });
-      child.unref();
+      const open = (await import("open")).default;
+      await open(filePath);
 
       return { success: true, path: filePath, message: "HTML preview launched in browser." };
     }
