@@ -157,7 +157,7 @@ Access these settings in the LM Studio "Plugins" tab:
 
 ## Developer Guide
 
-See [CODE_OVERVIEW.md](./CODE_OVERVIEW.md) for architectural details.
+See [CODE_OVERVIEW.md](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox/blob/main/CODE_OVERVIEW.md) for architectural details.
 
 ---
 
