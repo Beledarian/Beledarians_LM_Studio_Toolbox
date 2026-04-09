@@ -2,11 +2,15 @@ import { text, tool, type Tool, type ToolsProvider, type LMStudioClient } from "
 import { spawn } from "child_process";
 import { rm, writeFile, readdir, readFile, stat, mkdir, rename, copyFile, appendFile } from "fs/promises";
 import * as os from "os";
-import { join, resolve, dirname, isAbsolute } from "path";
+import { join, resolve, dirname, isAbsolute, relative } from "path";
 import { z } from "zod";
 import { pluginConfigSchematics } from "./config";
 import { findLMStudioHome } from "./findLMStudioHome";
 import { getPersistedState, savePersistedState, ensureWorkspaceExists } from "./stateManager";
+import { executeBrowserActions } from "./browserActions";
+import { rankFuzzyMatches } from "./fuzzySearch";
+import { extractHandoffMessage } from "./handoffMessage";
+import type { Browser, Page } from "puppeteer";
 
 // --- Security Helper ---
 function validatePath(baseDir: string, requestedPath: string): string {
@@ -92,6 +96,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
   let allowPython = pluginConfig.get("allowPythonExecution");
   let allowTerminal = pluginConfig.get("allowTerminalExecution");
   let allowShell = pluginConfig.get("allowShellCommandExecution");
+  let allowBrowserControl = pluginConfig.get("allowBrowserControl");
   const enableMemory = pluginConfig.get("enableMemory");
   const enableWikipedia = pluginConfig.get("enableWikipediaTool");
   const enableLocalRag = pluginConfig.get("enableLocalRag");
@@ -105,6 +110,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     allowPython = true;
     allowTerminal = true;
     allowShell = true;
+    allowBrowserControl = true;
   }
 
   // Ensure the directory exists (idempotent)
@@ -115,6 +121,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
   }
 
   const tools: Tool[] = [];
+  let browserSession: { browser: Browser; page: Page; currentUrl: string } | null = null;
 
   const allowGit = pluginConfig.get("allowGitOperations");
   const allowDb = pluginConfig.get("allowDatabaseInspection");
@@ -957,70 +964,143 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
 
   const webSearchTool = tool({
     name: "web_search",
-    description: "Search the web using multiple providers (DuckDuckGo, Google, Bing). Can automatically fallback if a provider fails, or query specific providers.",
+    description: "Search the web using multiple providers (DuckDuckGo, Google, Bing). Uses no-key providers first, then browser providers as fallback.",
     parameters: {
       query: z.string(),
-      providers: z.array(z.enum(["duckduckgo-api", "duckduckgo-html", "google", "bing"]))
+      providers: z.array(z.enum(["duckduckgo-api", "duckduckgo-fetch", "duckduckgo-html", "google", "bing"]))
         .optional()
-        .describe("Optional: List of specific providers to query. If omitted, a fallback chain is used: DDG API -> DDG Puppeteer -> Google -> Bing."),
+        .describe("Optional: List of specific providers. If omitted, fallback chain is: DDG API -> DDG HTML fetch -> DDG browser -> Google -> Bing."),
     },
     implementation: async ({ query, providers }) => {
-      const results: Array<{ title: string; link: string; snippet: string; provider: string }> = [];
+      type SearchProvider = "duckduckgo-api" | "duckduckgo-fetch" | "duckduckgo-html" | "google" | "bing";
+      type SearchResult = { title: string; link: string; snippet: string; provider: SearchProvider };
+
+      const results: SearchResult[] = [];
       const errors: string[] = [];
       const logs: string[] = [];
 
-      // --- Provider Implementations ---
+      const decodeHtmlEntities = (value: string) =>
+        value
+          .replace(/&quot;/g, "\"")
+          .replace(/&#39;/g, "'")
+          .replace(/&apos;/g, "'")
+          .replace(/&lt;/g, "<")
+          .replace(/&gt;/g, ">")
+          .replace(/&nbsp;/g, " ")
+          .replace(/&amp;/g, "&");
 
-      const searchFunctions = {
+      const stripHtml = (value: string) =>
+        decodeHtmlEntities(value)
+          .replace(/<[^>]+>/g, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+
+      const normalizeDuckDuckGoLink = (link: string): string => {
+        const decoded = decodeHtmlEntities(link);
+        const absolute = decoded.startsWith("//")
+          ? `https:${decoded}`
+          : decoded.startsWith("/")
+            ? `https://duckduckgo.com${decoded}`
+            : decoded;
+
+        try {
+          const parsed = new URL(absolute);
+          const redirect = parsed.searchParams.get("uddg");
+          if (redirect) {
+            return decodeURIComponent(redirect);
+          }
+        } catch {
+          // Return original normalized URL below.
+        }
+
+        return absolute;
+      };
+
+      const parseDuckDuckGoHtml = (html: string, provider: "duckduckgo-fetch" | "duckduckgo-html"): SearchResult[] => {
+        const parsedResults: SearchResult[] = [];
+        const titleRegex = /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+        let match: RegExpExecArray | null;
+
+        while ((match = titleRegex.exec(html)) !== null) {
+          const link = normalizeDuckDuckGoLink(match[1]);
+          const title = stripHtml(match[2]);
+          const nearbyHtml = html.slice(match.index, Math.min(html.length, match.index + 1800));
+          const snippetMatch = nearbyHtml.match(/class="result__snippet"[^>]*>([\s\S]*?)<\/(?:a|div)>/i);
+          const snippet = snippetMatch ? stripHtml(snippetMatch[1]) : "";
+
+          if (title && link) {
+            parsedResults.push({ title, link, snippet, provider });
+          }
+          if (parsedResults.length >= 10) break;
+        }
+
+        return parsedResults;
+      };
+
+      const launchBrowser = async () => {
+        const puppeteer = await import("puppeteer");
+        return puppeteer.launch({
+          headless: true,
+          args: ["--no-sandbox", "--disable-setuid-sandbox"],
+        });
+      };
+
+      const searchFunctions: Record<SearchProvider, (q: string) => Promise<SearchResult[]>> = {
         "duckduckgo-api": async (q: string) => {
           const { search, SafeSearchType } = await import("duck-duck-scrape");
-          // Simple retry logic for DDG API
           let attempt = 0;
+          let lastError: unknown = null;
+
           while (attempt < 2) {
             try {
               const r = await search(q, { safeSearch: SafeSearchType.OFF });
               if (r.results && r.results.length > 0) {
-                return r.results.map((result: any) => ({
+                return r.results.slice(0, 10).map((result: any) => ({
                   title: result.title,
                   link: result.url,
                   snippet: result.description,
-                  provider: "duckduckgo-api"
+                  provider: "duckduckgo-api",
                 }));
               }
-              break; // No results but successful call
+              break;
             } catch (e) {
+              lastError = e;
               attempt++;
-              await new Promise(r => setTimeout(r, 1000));
+              await new Promise(res => setTimeout(res, 1000));
             }
           }
-          throw new Error("No results or API failed");
+
+          if (lastError) {
+            throw lastError;
+          }
+          throw new Error("DuckDuckGo API returned no results");
+        },
+
+        "duckduckgo-fetch": async (q: string) => {
+          const response = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`, {
+            headers: {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+              "Accept-Language": "en-US,en;q=0.9",
+            },
+          });
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+
+          const html = await response.text();
+          const extracted = parseDuckDuckGoHtml(html, "duckduckgo-fetch");
+          if (extracted.length > 0) return extracted;
+          throw new Error("No results parsed from DuckDuckGo HTML");
         },
 
         "duckduckgo-html": async (q: string) => {
-          const puppeteer = await import("puppeteer");
-          const browser = await puppeteer.launch({ headless: true });
+          const browser = await launchBrowser();
           try {
             const page = await browser.newPage();
-            // Use the HTML-only version for easier scraping/less JS blocking
-            await page.goto(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`, { waitUntil: 'networkidle2', timeout: 15000 });
+            await page.goto(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`, { waitUntil: "networkidle2", timeout: 15000 });
 
-            const extracted = await page.evaluate(() => {
-              const items = document.querySelectorAll('.result');
-              const data = [];
-              for (const item of items) {
-                const linkEl = item.querySelector('.result__a');
-                const snippetEl = item.querySelector('.result__snippet');
-                if (linkEl) {
-                  data.push({
-                    title: (linkEl as HTMLElement).innerText,
-                    link: linkEl.getAttribute('href') || "",
-                    snippet: snippetEl ? (snippetEl as HTMLElement).innerText : "",
-                    provider: "duckduckgo-html"
-                  });
-                }
-              }
-              return data;
-            });
+            const html = await page.content();
+            const extracted = parseDuckDuckGoHtml(html, "duckduckgo-html");
             if (extracted.length > 0) return extracted;
             throw new Error("No results found");
           } finally {
@@ -1029,31 +1109,30 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         },
 
         "google": async (q: string) => {
-          const puppeteer = await import("puppeteer");
-          const browser = await puppeteer.launch({ headless: true });
+          const browser = await launchBrowser();
           try {
             const page = await browser.newPage();
-            await page.goto(`https://www.google.com/search?q=${encodeURIComponent(q)}`, { waitUntil: 'networkidle2', timeout: 15000 });
+            await page.goto(`https://www.google.com/search?q=${encodeURIComponent(q)}`, { waitUntil: "networkidle2", timeout: 15000 });
 
             const extracted = await page.evaluate(() => {
-              const items = document.querySelectorAll('div.g');
+              const items = document.querySelectorAll("div.g");
               const data = [];
               for (const item of items) {
-                const titleEl = item.querySelector('h3');
-                const linkEl = item.querySelector('a');
-                const snippetEl = item.querySelector('div[style*="-webkit-line-clamp"]') || item.querySelector('div.VwiC3b');
+                const titleEl = item.querySelector("h3");
+                const linkEl = item.querySelector("a");
+                const snippetEl = item.querySelector('div[style*="-webkit-line-clamp"]') || item.querySelector("div.VwiC3b");
                 if (titleEl && linkEl) {
                   data.push({
                     title: titleEl.innerText,
-                    link: linkEl.getAttribute('href') || "",
+                    link: linkEl.getAttribute("href") || "",
                     snippet: snippetEl ? (snippetEl as HTMLElement).innerText : "",
-                    provider: "google"
+                    provider: "google" as const,
                   });
                 }
               }
               return data;
             });
-            if (extracted.length > 0) return extracted;
+            if (extracted.length > 0) return extracted.slice(0, 10);
             throw new Error("No results found");
           } finally {
             await browser.close();
@@ -1061,51 +1140,44 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         },
 
         "bing": async (q: string) => {
-          const puppeteer = await import("puppeteer");
-          const browser = await puppeteer.launch({ headless: true });
+          const browser = await launchBrowser();
           try {
             const page = await browser.newPage();
-            await page.goto(`https://www.bing.com/search?q=${encodeURIComponent(q)}`, { waitUntil: 'networkidle2', timeout: 15000 });
+            await page.goto(`https://www.bing.com/search?q=${encodeURIComponent(q)}`, { waitUntil: "networkidle2", timeout: 15000 });
 
             const extracted = await page.evaluate(() => {
-              const items = document.querySelectorAll('li.b_algo');
+              const items = document.querySelectorAll("li.b_algo");
               const data = [];
               for (const item of items) {
-                const titleEl = item.querySelector('h2 a');
-                const linkEl = item.querySelector('h2 a');
-                const snippetEl = item.querySelector('p');
+                const titleEl = item.querySelector("h2 a");
+                const linkEl = item.querySelector("h2 a");
+                const snippetEl = item.querySelector("p");
                 if (titleEl && linkEl) {
                   data.push({
                     title: (titleEl as HTMLElement).innerText,
-                    link: linkEl.getAttribute('href') || "",
+                    link: linkEl.getAttribute("href") || "",
                     snippet: snippetEl ? (snippetEl as HTMLElement).innerText : "",
-                    provider: "bing"
+                    provider: "bing" as const,
                   });
                 }
               }
               return data;
             });
-            if (extracted.length > 0) return extracted;
+            if (extracted.length > 0) return extracted.slice(0, 10);
             throw new Error("No results found");
           } finally {
             await browser.close();
           }
-        }
+        },
       };
 
-      // --- Execution Logic ---
-
       if (providers && providers.length > 0) {
-        // Manual Selection
         for (const providerKey of providers) {
           try {
             logs.push(`[Manual] Attempting ${providerKey}...`);
-            const fn = searchFunctions[providerKey];
-            if (fn) {
-              const pResults = await fn(query);
-              results.push(...pResults);
-              logs.push(`[Manual] Success: ${providerKey} found ${pResults.length} results.`);
-            }
+            const pResults = await searchFunctions[providerKey](query);
+            results.push(...pResults);
+            logs.push(`[Manual] Success: ${providerKey} found ${pResults.length} results.`);
           } catch (e) {
             const errMsg = e instanceof Error ? e.message : String(e);
             errors.push(`${providerKey}: ${errMsg}`);
@@ -1113,13 +1185,11 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           }
         }
       } else {
-        // Fallback Chain
-        const chain: Array<keyof typeof searchFunctions> = ["duckduckgo-api", "duckduckgo-html", "google", "bing"];
+        const chain: SearchProvider[] = ["duckduckgo-api", "duckduckgo-fetch", "duckduckgo-html", "google", "bing"];
 
         for (let i = 0; i < chain.length; i++) {
           const providerKey = chain[i];
           const nextProvider = chain[i + 1];
-
           try {
             logs.push(`[Fallback Chain] Attempting ${providerKey}...`);
             const pResults = await searchFunctions[providerKey](query);
@@ -1139,17 +1209,26 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         return {
           error: "All attempted search providers failed.",
           attempts: errors,
-          trace: logs
+          trace: logs,
         };
       }
 
+      const seenLinks = new Set<string>();
+      const dedupedResults = results.filter(r => {
+        const key = r.link.trim();
+        if (!key || seenLinks.has(key)) return false;
+        seenLinks.add(key);
+        return true;
+      });
+
       return {
-        results: results,
+        results: dedupedResults,
         meta: {
-          total_found: results.length,
-          providers_used: [...new Set(results.map(r => r.provider))],
-          trace: logs
-        }
+          total_found: dedupedResults.length,
+          providers_used: [...new Set(dedupedResults.map(r => r.provider))],
+          no_api_key_required: true,
+          trace: logs,
+        },
       };
     },
   });
@@ -1381,6 +1460,42 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
   });
   tools.push(findFilesTool);
 
+  const fuzzyFindLocalFilesTool = tool({
+    name: "fuzzy_find_local_files",
+    description: "Fuzzy find local files by path/name similarity using Levenshtein scoring.",
+    parameters: {
+      query: z.string().describe("Search query to match against file names/paths."),
+      path: z.string().optional().describe("Sub-directory to search in (default: current directory)."),
+      max_results: z.number().int().min(1).max(20).optional().describe("Max results to return (default: 5)."),
+    },
+    implementation: async ({ query, path = ".", max_results = 5 }) => {
+      try {
+        const targetDir = validatePath(currentWorkingDirectory, path);
+        const entries = await readdir(targetDir, { recursive: true, withFileTypes: true });
+        const files = entries
+          .filter(entry => entry.isFile())
+          .map(entry => {
+            const fullPath = join(entry.path, entry.name);
+            const relativePath = relative(targetDir, fullPath);
+            return relativePath.replace(/\\/g, "/");
+          });
+
+        const ranked = rankFuzzyMatches(query, files, max_results);
+        return {
+          query,
+          path: targetDir,
+          results: ranked.map(item => ({
+            path: item.value,
+            score: item.score,
+          })),
+        };
+      } catch (error) {
+        return { error: `Fuzzy file search failed: ${error instanceof Error ? error.message : String(error)}` };
+      }
+    },
+  });
+  tools.push(fuzzyFindLocalFilesTool);
+
   const getFileMetadataTool = tool({
     name: "get_file_metadata",
     description: "Get metadata (size, dates) for a specific file.",
@@ -1582,20 +1697,236 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
   });
   tools.push(previewHtmlTool);
 
+  const browserActionSchema = z.object({
+    type: z.enum(["wait_for_selector", "wait", "click", "type", "press", "select", "hover", "scroll", "evaluate"]),
+    selector: z.string().optional().describe("CSS selector used by selector-based actions."),
+    text: z.string().optional().describe("Text payload for type action."),
+    value: z.string().optional().describe("Value payload for select action."),
+    key: z.string().optional().describe("Keyboard key for press action (e.g., Enter, Tab)."),
+    milliseconds: z.number().int().min(0).max(30000).optional().describe("Delay in milliseconds for wait action."),
+    x: z.number().optional().describe("Horizontal scroll delta for scroll action."),
+    y: z.number().optional().describe("Vertical scroll delta for scroll action."),
+    script: z.string().optional().describe("JavaScript snippet for evaluate action (executed in page context)."),
+  });
+
+  const browserSessionOpenTool = tool({
+    name: "browser_session_open",
+    description: "Open a persistent browser session (single active page), navigate to URL, and return page text for context.",
+    parameters: {
+      url: z.string(),
+      wait_for_selector: z.string().optional().describe("Optional selector to wait for after navigation."),
+      include_page_text: z.boolean().optional().describe("If true (default), returns full page text content after opening."),
+    },
+    implementation: createSafeToolImplementation(async ({ url, wait_for_selector, include_page_text = true }) => {
+      try {
+        if (browserSession) {
+          await browserSession.browser.close().catch(() => { });
+          browserSession = null;
+        }
+
+        const puppeteer = await import("puppeteer");
+        const browser = await puppeteer.launch({
+          headless: true,
+          args: ["--no-sandbox", "--disable-setuid-sandbox"],
+        });
+        const page = await browser.newPage();
+        await page.goto(url, { waitUntil: "networkidle0", timeout: 30000 });
+        if (wait_for_selector) {
+          await page.waitForSelector(wait_for_selector, { timeout: 15000 });
+        }
+
+        browserSession = {
+          browser,
+          page,
+          currentUrl: page.url(),
+        };
+
+        const pageText = include_page_text
+          ? await page.evaluate(() => document.body.innerText || "")
+          : undefined;
+
+        return {
+          success: true,
+          session_active: true,
+          url: page.url(),
+          title: await page.title(),
+          text_content: pageText,
+          text_length: pageText ? pageText.length : 0,
+          message: "Browser session opened.",
+        };
+      } catch (error) {
+        return { error: `Failed to open browser session: ${error instanceof Error ? error.message : String(error)}` };
+      }
+    }, allowBrowserControl, "browser_control"),
+  });
+  tools.push(browserSessionOpenTool);
+
+  const browserSessionControlTool = tool({
+    name: "browser_session_control",
+    description: "Control the active persistent browser session. Supports actions, page reading, screenshot capture, and fuzzy finding in-page text/selectors.",
+    parameters: {
+      actions: z.array(browserActionSchema).optional().describe("Optional scripted browser actions to execute on the active page."),
+      read_page: z.boolean().optional().describe("If true (default), returns page metadata. Full text is returned only on URL change or when full_read=true."),
+      full_read: z.boolean().optional().describe("If true, forces full page text output even when URL has not changed."),
+      screenshot_path: z.string().optional().describe("Optional screenshot output path."),
+      full_page_screenshot: z.boolean().optional().describe("If true, captures full page screenshot."),
+      fuzzy_find: z.string().optional().describe("Optional fuzzy-find query for in-page content/selectors."),
+      max_results: z.number().int().min(1).max(20).optional().describe("Max fuzzy results to return (default: 5)."),
+    },
+    implementation: createSafeToolImplementation(async ({ actions, read_page = true, full_read = false, screenshot_path, full_page_screenshot, fuzzy_find, max_results = 5 }) => {
+      if (!browserSession) {
+        return { error: "No active browser session. Call 'browser_session_open' first." };
+      }
+
+      try {
+        const beforeUrl = browserSession.page.url();
+        const actionLog = await executeBrowserActions(browserSession.page, actions || []);
+        const afterUrl = browserSession.page.url();
+        const urlChanged = beforeUrl !== afterUrl;
+        browserSession.currentUrl = afterUrl;
+
+        let screenshotSaved = false;
+        if (screenshot_path) {
+          const screenshotFilePath = validatePath(currentWorkingDirectory, screenshot_path);
+          await browserSession.page.screenshot({ path: screenshotFilePath, fullPage: full_page_screenshot ?? false });
+          screenshotSaved = true;
+        }
+
+        let pageSnapshot:
+          | { url: string; title: string; text_content?: string; text_length?: number; note?: string }
+          | undefined = undefined;
+        if (read_page) {
+          const title = await browserSession.page.title();
+          if (urlChanged || full_read) {
+            const textContent = await browserSession.page.evaluate(() => document.body.innerText || "");
+            pageSnapshot = {
+              url: afterUrl,
+              title,
+              text_content: textContent,
+              text_length: textContent.length,
+            };
+          } else {
+            pageSnapshot = {
+              url: afterUrl,
+              title,
+              note: "Full page text omitted (URL unchanged). Set full_read=true to force full output.",
+            };
+          }
+        }
+
+        let fuzzyResults: Array<{ text: string; selector: string; score: number }> = [];
+        if (typeof fuzzy_find === "string" && fuzzy_find.trim()) {
+          const candidates = await browserSession.page.evaluate(() => {
+            const dedup = new Map<string, { text: string; selector: string }>();
+            const nodes = document.querySelectorAll("a,button,input,textarea,select,[role='button'],[aria-label],h1,h2,h3,h4,h5,h6,p,span");
+
+            const clean = (value: string) => value.replace(/\s+/g, " ").trim();
+            const classSelector = (el: Element) => {
+              const classes = Array.from(el.classList).slice(0, 2).map(c => c.replace(/[^a-zA-Z0-9_-]/g, ""));
+              return classes.length > 0 ? `.${classes.join(".")}` : "";
+            };
+
+            const buildSelector = (el: Element) => {
+              if ((el as HTMLElement).id) return `#${(el as HTMLElement).id}`;
+              const name = el.getAttribute("name");
+              if (name) return `${el.tagName.toLowerCase()}[name="${name.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"]`;
+              return `${el.tagName.toLowerCase()}${classSelector(el)}`;
+            };
+
+            for (const node of nodes) {
+              const element = node as HTMLElement;
+              const text = clean(
+                element.innerText ||
+                (element as HTMLInputElement).value ||
+                element.getAttribute("aria-label") ||
+                "",
+              );
+              if (!text) continue;
+              const selector = buildSelector(element);
+              const key = `${text}||${selector}`;
+              if (!dedup.has(key)) {
+                dedup.set(key, { text: text.substring(0, 200), selector });
+              }
+              if (dedup.size >= 400) break;
+            }
+
+            return Array.from(dedup.values());
+          });
+
+          const ranked = candidates
+            .map(candidate => ({
+              ...candidate,
+              score: Math.max(
+                rankFuzzyMatches(fuzzy_find, [candidate.text], 1)[0]?.score ?? 0,
+                rankFuzzyMatches(fuzzy_find, [candidate.selector], 1)[0]?.score ?? 0,
+              ),
+            }))
+            .sort((a, b) => b.score - a.score)
+            .slice(0, max_results);
+
+          fuzzyResults = ranked.map(item => ({
+            text: item.text,
+            selector: item.selector,
+            score: item.score,
+          }));
+        }
+
+        return {
+          success: true,
+          session_active: true,
+          actions_executed: actionLog,
+          screenshot_saved: screenshotSaved,
+          url_changed: urlChanged,
+          url_change_notice: urlChanged ? `Url changed to -> [${afterUrl}]` : undefined,
+          page: pageSnapshot,
+          fuzzy_find_results: fuzzyResults,
+        };
+      } catch (error) {
+        return { error: `Browser session control failed: ${error instanceof Error ? error.message : String(error)}` };
+      }
+    }, allowBrowserControl, "browser_control"),
+  });
+  tools.push(browserSessionControlTool);
+
+  const browserSessionCloseTool = tool({
+    name: "browser_session_close",
+    description: "Close the active persistent browser session.",
+    parameters: {},
+    implementation: createSafeToolImplementation(async () => {
+      if (!browserSession) {
+        return { success: true, session_active: false, message: "No active browser session." };
+      }
+
+      try {
+        await browserSession.browser.close();
+        browserSession = null;
+        return { success: true, session_active: false, message: "Browser session closed." };
+      } catch (error) {
+        return { error: `Failed to close browser session: ${error instanceof Error ? error.message : String(error)}` };
+      }
+    }, allowBrowserControl, "browser_control"),
+  });
+  tools.push(browserSessionCloseTool);
+
   const browserOpenPageTool = tool({
     name: "browser_open_page",
-    description: "Open a webpage in a headless browser (Puppeteer), render it, and return the content. Useful for JS-heavy sites. Can also take a screenshot.",
+    description: "Open a webpage in a headless browser (Puppeteer), render it once, and return content. One-shot only; do not use for multi-step navigation.",
     parameters: {
       url: z.string(),
       screenshot_path: z.string().optional().describe("Path to save a screenshot (e.g., 'screenshot.png')."),
       wait_for_selector: z.string().optional().describe("CSS selector to wait for before returning."),
+      full_page_screenshot: z.boolean().optional().describe("If true, captures the full page when taking a screenshot."),
+      actions: z.array(browserActionSchema).optional().describe("Optional scripted browser steps to run after navigation."),
     },
-    implementation: async ({ url, screenshot_path, wait_for_selector }) => {
+    implementation: createSafeToolImplementation(async ({ url, screenshot_path, wait_for_selector, full_page_screenshot, actions }) => {
       let browser;
       try {
         // Dynamically import puppeteer
         const puppeteer = await import("puppeteer");
-        browser = await puppeteer.launch({ headless: true });
+        browser = await puppeteer.launch({
+          headless: true,
+          args: ["--no-sandbox", "--disable-setuid-sandbox"],
+        });
         const page = await browser.newPage();
 
         try {
@@ -1605,21 +1936,29 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             await page.waitForSelector(wait_for_selector, { timeout: 10000 });
           }
 
+          const beforeActionUrl = page.url();
+          const action_log = await executeBrowserActions(page, actions || []);
+          const currentUrl = page.url();
+          const urlChanged = currentUrl !== beforeActionUrl;
+
           const title = await page.title();
           const textContent = await page.evaluate(() => document.body.innerText || "");
 
           let screenshot_saved = false;
           if (screenshot_path) {
             const screenshotFilePath = validatePath(currentWorkingDirectory, screenshot_path);
-            await page.screenshot({ path: screenshotFilePath, fullPage: false });
+            await page.screenshot({ path: screenshotFilePath, fullPage: full_page_screenshot ?? false });
             screenshot_saved = true;
           }
 
           return {
-            url,
+            url: currentUrl,
             title,
             text_content: textContent.substring(0, 5000),
             screenshot_saved,
+            actions_executed: action_log,
+            url_changed: urlChanged,
+            url_change_notice: urlChanged ? `Url changed to -> [${currentUrl}]` : undefined,
           };
         } finally {
           await browser.close();
@@ -1630,7 +1969,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         }
         return { error: `Browser operation failed: ${error instanceof Error ? error.message : String(error)}` };
       }
-    }
+    }, allowBrowserControl, "browser_control")
   });
   tools.push(browserOpenPageTool);
 
@@ -1820,12 +2159,14 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
 
         const subAgentProfilesStr = pluginConfig.get("subAgentProfiles");
         const debugMode = pluginConfig.get("enableDebugMode");
+        const subAgentDebugLogging = pluginConfig.get("enableSubAgentDebugLogging");
         const autoSave = pluginConfig.get("subAgentAutoSave");
         const showFullCode = pluginConfig.get("showFullCodeOutput");
 
         const allowFileSystem = pluginConfig.get("subAgentAllowFileSystem");
         const allowWeb = pluginConfig.get("subAgentAllowWeb");
         const allowCode = pluginConfig.get("subAgentAllowCode");
+        const allowSubAgentBrowserControl = pluginConfig.get("subAgentAllowBrowserControl");
 
         if (!enableSecondary) return { error: "Secondary agent is disabled in settings." };
 
@@ -1884,8 +2225,9 @@ Always assume relative paths are from this directory.`;
           const toolsEnabled = allow_tools || forceTools;
           if (toolsEnabled) {
             const allowedTools = [];
-            if (allowFileSystem) allowedTools.push("read_file", "list_directory", "save_file", "replace_text_in_file", "delete_files_by_pattern", "rag_local_files", "search_file_content");
-            if (allowWeb) allowedTools.push("wikipedia_search", "duckduckgo_search", "fetch_web_content", "rag_web_content");
+            if (allowFileSystem) allowedTools.push("read_file", "list_directory", "save_file", "replace_text_in_file", "delete_files_by_pattern", "rag_local_files", "fuzzy_find_local_files", "search_file_content");
+            if (allowWeb) allowedTools.push("wikipedia_search", "web_search", "duckduckgo_search", "fetch_web_content", "rag_web_content");
+            if (allowWeb && allowSubAgentBrowserControl && allowBrowserControl) allowedTools.push("browser_session_open", "browser_session_control", "browser_session_close");
             if (allowCode) allowedTools.push("run_python", "run_javascript");
 
             if (allowedTools.length > 0) {
@@ -1893,7 +2235,12 @@ Always assume relative paths are from this directory.`;
               currentSystemPrompt += `\n\n## Allowed Tools\nYou have access to the following tools via JSON output: ${toolsList}.\nRefer to the "Tool Usage" section above for the JSON format.\n`;
               toolsReminder = `\n\n[SYSTEM REMINDER: You have access to tools: ${toolsList}. If you need information you don't have, USE A TOOL. Do not refuse.]`;
             }
+            if (allowWeb && allowSubAgentBrowserControl && allowBrowserControl) {
+              currentSystemPrompt += `\n\n## Browser Navigation Rule\nFor multi-step browsing/navigation, you MUST use browser_session_open -> browser_session_control -> browser_session_close.\nUse browser_open_page only for one-shot page reads.`;
+            }
           }
+
+          currentSystemPrompt += `\n\n## Optional Handoff Message\nIf you want the main agent to relay your findings, include either:\n1) [HANDOFF_MESSAGE]...[/HANDOFF_MESSAGE]\nOR\n2) JSON with a \`handoff_message\` field (optionally with \`response\` or \`final_response\`).`;
 
           const msgList = [
             { role: "system", content: currentSystemPrompt },
@@ -1903,6 +2250,7 @@ Always assume relative paths are from this directory.`;
           let loops = 0;
           let finalContent = "";
           let filesModified: string[] = [];
+          let handoffMessage = "";
 
           while (loops < loopLimit) {
             try {
@@ -1925,7 +2273,10 @@ Always assume relative paths are from this directory.`;
               // Cleanup
               content = content.replace(/<\|.*?\|>/g, "").trim();
 
-              if (!toolsEnabled) return { response: content, filesModified };
+              if (!toolsEnabled) {
+                const extracted = extractHandoffMessage(content);
+                return { response: extracted.response, filesModified, handoff_message: extracted.handoffMessage };
+              }
 
               // Tool use check
               let toolCall = null;
@@ -1948,14 +2299,14 @@ Always assume relative paths are from this directory.`;
                 if (jsonMatch) {
                   try {
                     const parsed = JSON.parse(jsonMatch[0]);
-                    console.log(`[Sub-Agent] Parsed JSON:`, JSON.stringify(parsed).substring(0, 200));
+                    if (subAgentDebugLogging) console.log(`[Sub-Agent] Parsed JSON:`, JSON.stringify(parsed).substring(0, 200));
                     // Primary format: {"tool": "tool_name", "args": {...}}
                     if (parsed.tool && parsed.args) {
                       toolCall = parsed;
                     }
                     // Gemma format: {"tool": "tool_name", "parameters": {...}}
                     else if (parsed.tool && parsed.parameters) {
-                      console.log(`[Sub-Agent] Gemma format detected (tool + parameters)`);
+                      if (subAgentDebugLogging) console.log(`[Sub-Agent] Gemma format detected (tool + parameters)`);
                       let args = parsed.parameters;
                       // Map Gemma's 'path' to our expected 'file_name'
                       if (parsed.tool === "save_file") {
@@ -2000,17 +2351,17 @@ Always assume relative paths are from this directory.`;
                       } else {
                         // NEW: Check if the JSON itself contains file_name/content directly (some models)
                         if (parsed.file_name && parsed.content) {
-                          console.log(`[Sub-Agent] Direct save_file format detected`);
+                          if (subAgentDebugLogging) console.log(`[Sub-Agent] Direct save_file format detected`);
                           toolCall = { tool: "save_file", args: parsed };
                         }
                       }
                     }
                   } catch (e) {
                     // JSON parsing failed, toolCall remains null
-                    console.log(`[Sub-Agent] JSON parse error:`, e);
+                    if (subAgentDebugLogging) console.log(`[Sub-Agent] JSON parse error:`, e);
                   }
                 } else {
-                  console.log(`[Sub-Agent] No JSON found in response (first 200 chars):`, trimmed.substring(0, 200));
+                  if (subAgentDebugLogging) console.log(`[Sub-Agent] No JSON found in response (first 200 chars):`, trimmed.substring(0, 200));
                 }
               } catch (e) { }
 
@@ -2100,12 +2451,21 @@ Always assume relative paths are from this directory.`;
                     } else if (toolCall.tool === "rag_local_files") {
                       // simplified inline rag mock for brevity in this refactor
                       toolResult = "Local RAG available (mocked for refactor).";
+                    } else if (toolCall.tool === "fuzzy_find_local_files" && toolCall.args?.query) {
+                      const targetDir = validatePath(currentWorkingDirectory, toolCall.args?.path || ".");
+                      const maxResults = Math.min(Math.max(Number(toolCall.args?.max_results ?? 5), 1), 20);
+                      const entries = await readdir(targetDir, { recursive: true, withFileTypes: true });
+                      const files = entries
+                        .filter(entry => entry.isFile())
+                        .map(entry => relative(targetDir, join(entry.path, entry.name)).replace(/\\/g, "/"));
+                      const ranked = rankFuzzyMatches(toolCall.args.query, files, maxResults);
+                      toolResult = JSON.stringify(ranked.map(item => ({ path: item.value, score: item.score })));
                     }
                   }
                   // --- Web ---
                   if (allowWeb && !toolResult) {
                     if (toolCall.tool === "wikipedia_search") toolResult = "Wiki Search (mocked)";
-                    else if (toolCall.tool === "duckduckgo_search") {
+                    else if (toolCall.tool === "web_search" || toolCall.tool === "duckduckgo_search") {
                       const { search, SafeSearchType } = await import("duck-duck-scrape");
                       const r = await search(toolCall.args.query, { safeSearch: SafeSearchType.OFF });
                       toolResult = JSON.stringify(r.results.slice(0, 3));
@@ -2113,6 +2473,118 @@ Always assume relative paths are from this directory.`;
                     else if (toolCall.tool === "fetch_web_content" && toolCall.args?.url) {
                       const res = await fetch(toolCall.args.url);
                       toolResult = (await res.text()).substring(0, 5000);
+                    } else if (allowSubAgentBrowserControl && allowBrowserControl && toolCall.tool === "browser_session_open" && toolCall.args?.url) {
+                      if (browserSession) {
+                        await browserSession.browser.close().catch(() => { });
+                        browserSession = null;
+                      }
+                      const puppeteer = await import("puppeteer");
+                      const browser = await puppeteer.launch({
+                        headless: true,
+                        args: ["--no-sandbox", "--disable-setuid-sandbox"],
+                      });
+                      const page = await browser.newPage();
+                      await page.goto(toolCall.args.url, { waitUntil: "networkidle0", timeout: 30000 });
+                      if (toolCall.args.wait_for_selector) {
+                        await page.waitForSelector(toolCall.args.wait_for_selector, { timeout: 15000 });
+                      }
+                      browserSession = { browser, page, currentUrl: page.url() };
+                      const includePageText = toolCall.args.include_page_text !== false;
+                      const pageText = includePageText ? await page.evaluate(() => document.body.innerText || "") : undefined;
+                      toolResult = JSON.stringify({
+                        session_active: true,
+                        url: page.url(),
+                        title: await page.title(),
+                        text_content: pageText,
+                        text_length: pageText ? pageText.length : 0,
+                      });
+                    } else if (allowSubAgentBrowserControl && allowBrowserControl && toolCall.tool === "browser_session_control") {
+                      if (!browserSession) {
+                        toolResult = "Error: No active browser session.";
+                      } else {
+                        const beforeUrl = browserSession.page.url();
+                        const actionLog = await executeBrowserActions(browserSession.page, toolCall.args?.actions || []);
+                        const afterUrl = browserSession.page.url();
+                        const urlChanged = beforeUrl !== afterUrl;
+                        browserSession.currentUrl = afterUrl;
+
+                        let fuzzyResults: Array<{ text: string; selector: string; score: number }> = [];
+                        if (toolCall.args?.fuzzy_find) {
+                          const maxResults = Math.min(Math.max(Number(toolCall.args?.max_results ?? 5), 1), 20);
+                          const candidates = await browserSession.page.evaluate(() => {
+                            const dedup = new Map<string, { text: string; selector: string }>();
+                            const nodes = document.querySelectorAll("a,button,input,textarea,select,[role='button'],[aria-label],h1,h2,h3,h4,h5,h6,p,span");
+                            const clean = (value: string) => value.replace(/\s+/g, " ").trim();
+                            const classSelector = (el: Element) => {
+                              const classes = Array.from(el.classList).slice(0, 2).map(c => c.replace(/[^a-zA-Z0-9_-]/g, ""));
+                              return classes.length > 0 ? `.${classes.join(".")}` : "";
+                            };
+                            const buildSelector = (el: Element) => {
+                              if ((el as HTMLElement).id) return `#${(el as HTMLElement).id}`;
+                              const name = el.getAttribute("name");
+                              if (name) return `${el.tagName.toLowerCase()}[name="${CSS.escape(name)}"]`;
+                              return `${el.tagName.toLowerCase()}${classSelector(el)}`;
+                            };
+                            for (const node of nodes) {
+                              const element = node as HTMLElement;
+                              const text = clean(
+                                element.innerText ||
+                                (element as HTMLInputElement).value ||
+                                element.getAttribute("aria-label") ||
+                                "",
+                              );
+                              if (!text) continue;
+                              const selector = buildSelector(element);
+                              const key = `${text}||${selector}`;
+                              if (!dedup.has(key)) dedup.set(key, { text: text.substring(0, 200), selector });
+                              if (dedup.size >= 400) break;
+                            }
+                            return Array.from(dedup.values());
+                          });
+                          fuzzyResults = candidates
+                            .map(candidate => ({
+                              ...candidate,
+                              score: Math.max(
+                                rankFuzzyMatches(toolCall.args.fuzzy_find, [candidate.text], 1)[0]?.score ?? 0,
+                                rankFuzzyMatches(toolCall.args.fuzzy_find, [candidate.selector], 1)[0]?.score ?? 0,
+                              ),
+                            }))
+                            .sort((a, b) => b.score - a.score)
+                            .slice(0, maxResults);
+                        }
+
+                        const output: Record<string, unknown> = {
+                          session_active: true,
+                          actions_executed: actionLog,
+                          url: afterUrl,
+                          url_changed: urlChanged,
+                          url_change_notice: urlChanged ? `Url changed to -> [${afterUrl}]` : undefined,
+                          fuzzy_find_results: fuzzyResults,
+                        };
+                        if (toolCall.args?.read_page !== false) {
+                          const fullRead = toolCall.args?.full_read === true;
+                          output.title = await browserSession.page.title();
+                          if (urlChanged || fullRead) {
+                            const textContent = await browserSession.page.evaluate(() => document.body.innerText || "");
+                            output.text_content = textContent;
+                            output.text_length = textContent.length;
+                          } else {
+                            output.note = "Full page text omitted (URL unchanged). Set full_read=true to force full output.";
+                          }
+                        }
+                        if (toolCall.args?.screenshot_path) {
+                          const screenshotFilePath = validatePath(currentWorkingDirectory, toolCall.args.screenshot_path);
+                          await browserSession.page.screenshot({ path: screenshotFilePath, fullPage: !!toolCall.args?.full_page_screenshot });
+                          output.screenshot_saved = true;
+                        }
+                        toolResult = JSON.stringify(output);
+                      }
+                    } else if (allowSubAgentBrowserControl && allowBrowserControl && toolCall.tool === "browser_session_close") {
+                      if (browserSession) {
+                        await browserSession.browser.close().catch(() => { });
+                        browserSession = null;
+                      }
+                      toolResult = JSON.stringify({ session_active: false, message: "Browser session closed." });
                     }
                   }
                   // --- Code ---
@@ -2151,6 +2623,12 @@ Always assume relative paths are from this directory.`;
               msgList.length = 0;
               msgList.push(systemMsg, ...recentMsgs);
             }
+          }
+
+          if (finalContent) {
+            const extracted = extractHandoffMessage(finalContent);
+            finalContent = extracted.response;
+            handoffMessage = extracted.handoffMessage || "";
           }
 
           // --- Auto-Save Logic ---
@@ -2282,14 +2760,15 @@ Always assume relative paths are from this directory.`;
             }
           }
 
-          return { response: finalContent, filesModified };
+          return { response: finalContent, filesModified, handoff_message: handoffMessage || undefined };
         };
 
         // --- 1. Primary Agent Loop ---
         const primaryResult = await runAgentLoop(agent_role, task, context, 8, false, currentWorkingDirectory);
         if (primaryResult.error) return { error: primaryResult.error };
 
-        let finalResponse = primaryResult.response;
+        let finalResponse = primaryResult.response || "";
+        let handoffMessage: string | undefined = primaryResult.handoff_message;
 
         // --- 2. Auto-Debug Loop ---
         if (debugMode && primaryResult.filesModified.length > 0) {
@@ -2310,6 +2789,9 @@ Always assume relative paths are from this directory.`;
           finalResponse += "\n\n--- Auto-Debug Report ---\n" + (debugResult.response || "Debug pass completed.");
           if (debugResult.filesModified.length > 0) {
             finalResponse += `\n(The reviewer fixed these files: ${debugResult.filesModified.join(", ")})`;
+          }
+          if (!handoffMessage && debugResult.handoff_message) {
+            handoffMessage = debugResult.handoff_message;
           }
         }
 
@@ -2339,7 +2821,7 @@ Always assume relative paths are from this directory.`;
           finalResponse = finalResponse.replace(/```[\s\S]*?```/g, "\n[System: Code Block Hidden for Brevity. The code has been handled/saved by the sub-agent. Do NOT request it again. Proceed.]\n");
         }
 
-        return { response: finalResponse, generated_files: primaryResult.filesModified };
+        return { response: finalResponse, generated_files: primaryResult.filesModified, handoff_message: handoffMessage };
       },
       enableSecondary,
       "consult_secondary_agent"

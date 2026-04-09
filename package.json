@@ -1,11 +1,15 @@
 {
   "name": "beledarians-lm-studio-tools",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "",
   "main": "index.js",
   "scripts": {
     "dev": "lms dev",
-    "push": "lms push"
+    "push": "lms push",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "test": "node --test tests/browserActions.test.js tests/fuzzySearch.test.js tests/handoffMessage.test.js",
+    "ci": "npm run typecheck && npm run build && npm run test"
   },
   "author": "",
   "license": "ISC",

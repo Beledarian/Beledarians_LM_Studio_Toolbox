@@ -14,6 +14,7 @@
 - **move_file**: Move or rename.
 - **copy_file**: Copy a file.
 - **find_files**: Recursive search for files by name pattern.
+- **fuzzy_find_local_files**: Levenshtein fuzzy search for local file paths/names.
 - **get_file_metadata**: Get size, date, etc.
 - **open_file**: Open a file in the OS default app.
 
@@ -25,12 +26,16 @@
 - **run_test_command**: Run tests (npm test, etc.).
 
 ### Web & RAG
-- **duckduckgo_search**: Search the web.
+- **web_search**: Search the web with no-key fallback providers (DuckDuckGo API/fetch/browser, Google, Bing).
 - **fetch_web_content**: Get clean text from a URL.
 - **rag_web_content**: Fetch URL and perform RAG search on it.
 - **wikipedia_search**: Search Wikipedia.
 - **rag_local_files**: Perform RAG search on local files in the workspace.
-- **browser_open_page**: Open URL in headless browser (Puppeteer) with screenshot support.
+- **browser_session_open**: Open a persistent browser session (single active page).
+- **browser_session_control**: Run actions, read page, screenshot, and fuzzy-find inside current page (full text on URL change or when `full_read=true`).
+- **browser_session_close**: Close the persistent browser session.
+- **browser_open_page**: One-shot stateless browser render (do not use for multi-step navigation).
+- **Click workaround**: If selector click fails, use an `evaluate` action to locate by text and trigger `.click()`, then request `full_read=true`.
 - **preview_html**: Render HTML in default browser.
 
 ### Agent & Memory
@@ -38,6 +43,7 @@
 - **consult_secondary_agent**: Delegate tasks (summarization, coding) to a secondary model/server.
     - **Auto-Save**: Automatically detects and saves code blocks to files.
     - **Auto-Debug**: Can automatically review and fix code if enabled.
+    - **Structured Handoff**: Supports optional `handoff_message` payloads for main-agent relay.
 
 ### System
 - **get_system_info**: OS details.
