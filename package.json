@@ -8,7 +8,7 @@
     "push": "lms push",
     "typecheck": "tsc --noEmit",
     "build": "tsc",
-    "test": "node --test tests/browserActions.test.js tests/fuzzySearch.test.js tests/handoffMessage.test.js",
+    "test": "node --test tests/browserActions.test.js tests/fuzzySearch.test.js tests/handoffMessage.test.js tests/subAgentToolCallParser.test.js",
     "ci": "npm run typecheck && npm run build && npm run test"
   },
   "author": "",

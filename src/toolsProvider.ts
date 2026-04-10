@@ -10,6 +10,7 @@ import { getPersistedState, savePersistedState, ensureWorkspaceExists } from "./
 import { executeBrowserActions } from "./browserActions";
 import { rankFuzzyMatches } from "./fuzzySearch";
 import { extractHandoffMessage } from "./handoffMessage";
+import { parseSubAgentResponseMessage, type ParsedToolCall } from "./subAgentToolCallParser";
 import type { Browser, Page } from "puppeteer";
 
 // --- Security Helper ---
@@ -23,6 +24,38 @@ function validatePath(baseDir: string, requestedPath: string): string {
     throw new Error(`Access Denied: Path '${requestedPath}' is outside the workspace.`);
   }
   return resolved;
+}
+
+function extractLikelyFilePath(text: string): string | null {
+  const isPlausiblePath = (value: string): boolean => {
+    const candidate = value.trim();
+    if (!candidate) return false;
+    if (/[,\r\n]/.test(candidate)) return false;
+    if (candidate.includes("=") && !candidate.includes("\\") && !candidate.includes("/")) return false;
+    if (/[<>|*?]/.test(candidate)) return false;
+
+    const extensionMatch = candidate.match(/\.([A-Za-z0-9_-]{1,15})$/);
+    if (!extensionMatch) return false;
+    const extension = extensionMatch[1];
+    if (!/[A-Za-z]/.test(extension)) return false; // reject ".0" and similar numeric pseudo-extensions
+
+    return true;
+  };
+
+  const patterns = [
+    /['"]([A-Za-z]:\\[^'"\r\n]+)['"]/,
+    /\b([A-Za-z]:\\[^\s'"]+(?:\.[A-Za-z0-9_-]+)?)\b/,
+    /['"]((?:\.{0,2}[\\/])?[^'"\r\n]+\.[A-Za-z0-9_-]+)['"]/,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (!match?.[1]) continue;
+    const candidate = match[1].replace(/[),.;]+$/, "").trim();
+    if (!isPlausiblePath(candidate)) continue;
+    return candidate;
+  }
+  return null;
 }
 
 const createSafeToolImplementation = <TParameters, TReturn>(
@@ -2189,9 +2222,15 @@ Always assume relative paths are from this directory.`;
           ];
 
           let loops = 0;
+          let noToolCallCount = 0;
+          let executedToolCallCount = 0;
           let finalContent = "";
           let filesModified: string[] = [];
           let handoffMessage = "";
+          const maxSubAgentToolOutputChars = 30000;
+          const suggestedReadPath = allowFileSystem
+            ? extractLikelyFilePath(`${taskPrompt}\n${contextData}`)
+            : null;
 
           while (loops < loopLimit) {
             try {
@@ -2206,24 +2245,34 @@ Always assume relative paths are from this directory.`;
                 })
               });
 
-              if (!response.ok) return { error: `API Error: ${response.status}`, filesModified };
+              if (!response.ok) {
+                const errorBody = await response.text().catch(() => "");
+                const compactErrorBody = errorBody.replace(/\s+/g, " ").trim().substring(0, 600);
+                if (subAgentDebugLogging) {
+                  console.log(`[Sub-Agent] API error status=${response.status} body=${compactErrorBody}`);
+                }
+                const details = compactErrorBody ? ` - ${compactErrorBody}` : "";
+                return { error: `API Error: ${response.status}${details}`, filesModified };
+              }
 
               const data = await response.json();
-              let content = data.choices[0].message.content;
+              const message = data?.choices?.[0]?.message;
+              const parsedMessage = parseSubAgentResponseMessage(message);
+              const content = parsedMessage.content;
+              let toolCall: ParsedToolCall | null = parsedMessage.toolCall;
 
-              // Cleanup
-              content = content.replace(/<\|.*?\|>/g, "").trim();
+              if (subAgentDebugLogging) {
+                const preview = content.substring(0, 200);
+                console.log(`[Sub-Agent] Parse result source=${parsedMessage.toolCallSource} hasToolCall=${Boolean(toolCall)} preview=${preview}`);
+              }
 
               if (!toolsEnabled) {
                 const extracted = extractHandoffMessage(content);
                 return { response: extracted.response, filesModified, handoff_message: extracted.handoffMessage };
               }
 
-              // Tool use check
-              let toolCall = null;
-              try {
-                const trimmed = content.trim();
-                // Refusal check
+              const trimmed = content.trim();
+              if (!toolCall && trimmed) {
                 const refusalKeywords = [
                   "i cannot browse", "i don't have access", "i can't access",
                   "unable to browse", "real-time news", "no internet access",
@@ -2235,78 +2284,11 @@ Always assume relative paths are from this directory.`;
                   loops++;
                   continue;
                 }
-
-                const jsonMatch = trimmed.match(/\{[\s\S]*\}/);
-                if (jsonMatch) {
-                  try {
-                    const parsed = JSON.parse(jsonMatch[0]);
-                    if (subAgentDebugLogging) console.log(`[Sub-Agent] Parsed JSON:`, JSON.stringify(parsed).substring(0, 200));
-                    // Primary format: {"tool": "tool_name", "args": {...}}
-                    if (parsed.tool && parsed.args) {
-                      toolCall = parsed;
-                    }
-                    // Gemma format: {"tool": "tool_name", "parameters": {...}}
-                    else if (parsed.tool && parsed.parameters) {
-                      if (subAgentDebugLogging) console.log(`[Sub-Agent] Gemma format detected (tool + parameters)`);
-                      let args = parsed.parameters;
-                      // Map Gemma's 'path' to our expected 'file_name'
-                      if (parsed.tool === "save_file") {
-                        if (args.path && !args.file_name) args.file_name = args.path;
-                        if (args.data && !args.content) args.content = args.data;
-                      }
-                      toolCall = { tool: parsed.tool, args: args };
-                    }
-                    // Secondary format: {"name": "tool_name", "arguments": {...}} - commonly seen from some models
-                    else if (parsed.name && parsed.arguments) {
-                      let toolName = parsed.name;
-                      let args = parsed.arguments; // Extract arguments directly
-
-                      // Apply save_file specific argument mapping if necessary for this format
-                      if (toolName === "save_file") {
-                        // These mappings are for if args.path or args.data exist in the nested arguments
-                        if (args.path && !args.file_name) args.file_name = args.path;
-                        if (args.data && !args.content) args.content = args.data;
-                      }
-                      toolCall = { tool: toolName, args: args };
-                    }
-                    // Fallback format: just the args object, tool name from "to=..."
-                    else {
-                      const toolNameMatch = trimmed.match(/to=([a-zA-Z0-9_.]+)/);
-                      if (toolNameMatch) {
-                        let toolName = toolNameMatch[1];
-                        if (toolName.startsWith("functions.")) toolName = toolName.replace("functions.", "");
-
-                        let args = parsed; // Here 'parsed' is expected to be just the arguments object
-
-                        // Handle Array args for save_file (batch mode)
-                        if (toolName === "save_file" && Array.isArray(args)) {
-                          args = { files: args };
-                        }
-
-                        // Map 'path' to 'file_name' for save_file (for the flattened 'args' object)
-                        if (toolName === "save_file") {
-                          if (args.path && !args.file_name) args.file_name = args.path;
-                          if (args.data && !args.content) args.content = args.data;
-                        }
-                        toolCall = { tool: toolName, args: args };
-                      } else {
-                        // NEW: Check if the JSON itself contains file_name/content directly (some models)
-                        if (parsed.file_name && parsed.content) {
-                          if (subAgentDebugLogging) console.log(`[Sub-Agent] Direct save_file format detected`);
-                          toolCall = { tool: "save_file", args: parsed };
-                        }
-                      }
-                    }
-                  } catch (e) {
-                    // JSON parsing failed, toolCall remains null
-                    if (subAgentDebugLogging) console.log(`[Sub-Agent] JSON parse error:`, e);
-                  }
-                } else {
-                  if (subAgentDebugLogging) console.log(`[Sub-Agent] No JSON found in response (first 200 chars):`, trimmed.substring(0, 200));
-                }
-              } catch (e) { }
+              }
 
               if (toolCall && toolCall.tool) {
+                noToolCallCount = 0;
+                executedToolCallCount++;
                 msgList.push({ role: "assistant", content: content });
                 let toolResult = "";
                 try {
@@ -2314,7 +2296,10 @@ Always assume relative paths are from this directory.`;
                   if (allowFileSystem) {
                     if (toolCall.tool === "read_file" && toolCall.args?.file_name) {
                       const fpath = validatePath(currentWorkingDirectory, toolCall.args.file_name);
-                      toolResult = await readFile(fpath, "utf-8");
+                      const readContent = await readFile(fpath, "utf-8");
+                      toolResult = readContent.length > maxSubAgentToolOutputChars
+                        ? `${readContent.substring(0, maxSubAgentToolOutputChars)}\n... (truncated ${readContent.length - maxSubAgentToolOutputChars} chars)`
+                        : readContent;
                     } else if (toolCall.tool === "list_directory") {
                       const files = await readdir(currentWorkingDirectory);
                       toolResult = JSON.stringify(files);
@@ -2543,14 +2528,86 @@ Always assume relative paths are from this directory.`;
                 loops++;
               } else {
                 // NO TOOL CALL DETECTED
+                const shouldAutoFallbackRead =
+                  toolsEnabled &&
+                  allowFileSystem &&
+                  executedToolCallCount === 0 &&
+                  noToolCallCount === 0 &&
+                  typeof suggestedReadPath === "string" &&
+                  suggestedReadPath.length > 0;
+
+                if (shouldAutoFallbackRead) {
+                  try {
+                    const autoReadPath = validatePath(currentWorkingDirectory, suggestedReadPath);
+                    const autoReadStats = await stat(autoReadPath);
+                    if (!autoReadStats.isFile()) {
+                      throw new Error(`Not a file: ${autoReadPath}`);
+                    }
+                    const autoReadContent = await readFile(autoReadPath, "utf-8");
+                    const boundedContent = autoReadContent.length > 30000
+                      ? `${autoReadContent.substring(0, 30000)}\n... (truncated)`
+                      : autoReadContent;
+
+                    if (trimmed.length > 0) {
+                      msgList.push({ role: "assistant", content: content });
+                    }
+                    msgList.push({
+                      role: "user",
+                      content: `Tool Output: AUTO_FALLBACK read_file(${suggestedReadPath})\n${boundedContent}`,
+                    });
+                    executedToolCallCount++;
+                    loops++;
+                    continue;
+                  } catch (error) {
+                    if (subAgentDebugLogging) {
+                      console.log(`[Sub-Agent] Auto fallback read_file failed: ${error instanceof Error ? error.message : String(error)}`);
+                    }
+                    try {
+                      const autoFiles = await readdir(currentWorkingDirectory);
+                      const limitedFiles = autoFiles.slice(0, 200);
+                      if (trimmed.length > 0) {
+                        msgList.push({ role: "assistant", content: content });
+                      }
+                      msgList.push({
+                        role: "user",
+                        content: `Tool Output: AUTO_FALLBACK list_directory(.)\n${JSON.stringify(limitedFiles)}`,
+                      });
+                      executedToolCallCount++;
+                      loops++;
+                      continue;
+                    } catch {
+                      // ignore and continue to normal no-tool fallback behavior
+                    }
+                  }
+                }
+
                 // Check for explicit completion phrase or strict loop limit
-                if (content.includes("TASK_COMPLETED") || loops >= loopLimit - 1) {
+                const planningLikeText = /(?:\bI(?:'ll| will)\b|\blet me\b|\bnext\b|\bfirst\b)/i.test(trimmed);
+                const shouldTreatAsFinalResponse =
+                  executedToolCallCount > 0 &&
+                  trimmed.length >= 120 &&
+                  !planningLikeText;
+
+                if (content.includes("TASK_COMPLETED") || shouldTreatAsFinalResponse || loops >= loopLimit - 1) {
                   finalContent = content;
                   break; // Done
                 } else {
-                  // Keep-Alive: Force the agent to continue
-                  msgList.push({ role: "assistant", content: content });
-                  msgList.push({ role: "system", content: "SYSTEM NOTICE: You did not call a tool. If you are finished, output 'TASK_COMPLETED'. If not, please USE A TOOL (e.g., save_file, read_file) to proceed." });
+                  noToolCallCount++;
+                  if (content.trim().length > 0) {
+                    msgList.push({ role: "assistant", content: content });
+                  }
+
+                  let reminder = "SYSTEM NOTICE: You did not call a tool. If you are finished, output 'TASK_COMPLETED'. If not, USE A TOOL now and return a single JSON tool-call object only (no prose).";
+                  if (toolsEnabled) {
+                    if (allowFileSystem && suggestedReadPath && noToolCallCount <= 3) {
+                      const escapedPath = suggestedReadPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+                      reminder += `\nSuggested next step: {"tool":"read_file","args":{"file_name":"${escapedPath}"}}`;
+                    } else if (allowFileSystem && noToolCallCount <= 3) {
+                      reminder += `\nSuggested next step: {"tool":"list_directory","args":{}}`;
+                    }
+                  }
+
+                  msgList.push({ role: "system", content: reminder });
                   loops++;
                 }
               }
