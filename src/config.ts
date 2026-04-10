@@ -59,6 +59,10 @@ export const pluginConfigSchematics = createConfigSchematics()
     displayName: "Embedding Model",
     subtitle: "Model to use for RAG features (default: nomic-ai/nomic-embed-text-v1.5-GGUF)",
   }, "nomic-ai/nomic-embed-text-v1.5-GGUF")
+    .field("defaultWorkspacePath", "string", {
+      displayName: "Default Workspace Path",
+      subtitle: "Optional startup workspace path. Leave empty to use the built-in default workspace directory.",
+    }, "")
     .field("enableMemory", "boolean", {
       displayName: "Enable Memory",
       subtitle: "If enabled, the model can save and recall information from a 'memory.md' file in the workspace.",

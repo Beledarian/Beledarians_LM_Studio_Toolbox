@@ -70,6 +70,7 @@ export async function promptPreprocessor(ctl: PromptPreprocessorController, user
 
   // --- Delegation & Safety Instructions (Every Turn) ---
   const pluginConfig = ctl.getPluginConfig(pluginConfigSchematics);
+  const defaultWorkspacePath = pluginConfig.get("defaultWorkspacePath");
   const frequency = pluginConfig.get("subAgentFrequency");
   const debugMode = pluginConfig.get("enableDebugMode");
 
@@ -95,7 +96,7 @@ export async function promptPreprocessor(ctl: PromptPreprocessorController, user
 
   // --- Sub-Agent Documentation Injection (Startup OR On-Enable) ---
   const enableSecondary = pluginConfig.get("enableSecondaryAgent");
-  const state = await getPersistedState();
+  const state = await getPersistedState(defaultWorkspacePath);
 
   // Reset the injection flag on the first turn of a new conversation
   if (isFirstTurn) {
@@ -129,7 +130,7 @@ export async function promptPreprocessor(ctl: PromptPreprocessorController, user
     let injectionContent = TOOLS_DOCUMENTATION;
 
     try {
-        const { currentWorkingDirectory } = await getPersistedState();
+        const { currentWorkingDirectory } = await getPersistedState(defaultWorkspacePath);
         const startupPath = join(currentWorkingDirectory, "startup.md");
         const startupContent = await readFile(startupPath, "utf-8");
         const filesToRead = startupContent.split('\n').map(f => f.trim()).filter(f => f);
@@ -161,7 +162,7 @@ export async function promptPreprocessor(ctl: PromptPreprocessorController, user
 
   // Update message count and memory
   try {
-    const state = await getPersistedState();
+    const state = await getPersistedState(defaultWorkspacePath);
     state.messageCount++;
     await savePersistedState(state);
 
