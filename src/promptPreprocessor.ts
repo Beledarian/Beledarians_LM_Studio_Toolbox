@@ -130,7 +130,7 @@ export async function promptPreprocessor(ctl: PromptPreprocessorController, user
     let injectionContent = TOOLS_DOCUMENTATION;
 
     try {
-        const { currentWorkingDirectory } = await getPersistedState(defaultWorkspacePath);
+        const { currentWorkingDirectory } = state;
         const startupPath = join(currentWorkingDirectory, "startup.md");
         const startupContent = await readFile(startupPath, "utf-8");
         const filesToRead = startupContent.split('\n').map(f => f.trim()).filter(f => f);
@@ -162,7 +162,6 @@ export async function promptPreprocessor(ctl: PromptPreprocessorController, user
 
   // Update message count and memory
   try {
-    const state = await getPersistedState(defaultWorkspacePath);
     state.messageCount++;
     await savePersistedState(state);
 

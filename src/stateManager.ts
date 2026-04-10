@@ -23,16 +23,14 @@ function resolveWorkspaceDirectory(configuredWorkspacePath?: string): string {
 
 export async function getPersistedState(configuredWorkspacePath?: string): Promise<PluginState> {
   const configuredDirectory = resolveWorkspaceDirectory(configuredWorkspacePath);
-  const useConfiguredDirectory = (configuredWorkspacePath ?? "").trim().length > 0;
 
   try {
     const statePath = join(os.homedir(), ".beledarians-llm-toolbox", CONFIG_FILE_NAME);
     const content = await readFile(statePath, "utf-8");
     const state = JSON.parse(content);
     return {
-      currentWorkingDirectory: useConfiguredDirectory
-        ? configuredDirectory
-        : state.currentWorkingDirectory ?? configuredDirectory,
+      // configuredDirectory is a startup default/fallback, not a forced override
+      currentWorkingDirectory: state.currentWorkingDirectory ?? configuredDirectory,
       messageCount: state.messageCount ?? 0,
       dontAskToCompress: state.dontAskToCompress ?? false,
       subAgentDocsInjected: state.subAgentDocsInjected ?? false,
@@ -59,9 +57,9 @@ export async function savePersistedState(state: PluginState) {
 }
 
 export async function ensureWorkspaceExists(path: string) {
-    try {
-        await mkdir(path, { recursive: true });
-    } catch (error) {
-        console.error(`Failed to create/access directory ${path}`, error);
-    }
+  try {
+    await mkdir(path, { recursive: true });
+  } catch (error) {
+    console.error(`Failed to create/access directory ${path}`, error);
+  }
 }
