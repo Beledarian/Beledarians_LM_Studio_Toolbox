@@ -119,9 +119,10 @@ let isWorkspaceInitialized = false;
 export const toolsProvider: ToolsProvider = async (ctl) => {
   const client = (ctl as any).client as LMStudioClient;
   const pluginConfig = ctl.getPluginConfig(pluginConfigSchematics);
+  const defaultWorkspacePath = pluginConfig.get("defaultWorkspacePath");
 
   // Load state using shared manager
-  const fullState = await getPersistedState();
+  const fullState = await getPersistedState(defaultWorkspacePath);
   let currentWorkingDirectory = fullState.currentWorkingDirectory;
 
   const allowAllCode = pluginConfig.get("allowAllCode");
@@ -149,6 +150,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
   // Ensure the directory exists (idempotent)
   if (!isWorkspaceInitialized) {
     await ensureWorkspaceExists(currentWorkingDirectory);
+    fullState.currentWorkingDirectory = currentWorkingDirectory;
+    await savePersistedState(fullState);
     console.log(`Working directory set to: ${currentWorkingDirectory}`);
     isWorkspaceInitialized = true;
   }

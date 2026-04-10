@@ -106,6 +106,7 @@ Access these settings in the LM Studio "Plugins" tab:
 - **Sub-Agent Debug Logging:** Toggle detailed sub-agent parsing logs for troubleshooting.
 - **Sub-Agent Auto-Save:** Toggle automatic file saving (Default: On).
 - **Show Full Code Output:** Toggle whether to display the full code in chat or hide it for brevity (files are still saved).
+- **Default Workspace Path:** Set the startup workspace directory used by the plugin.
 - **Safety:** Enable/Disable "Allow Code Execution" for Python/JS/Shell.
 - **Browser Safety:** Browser automation for sub-agents requires all three toggles: `Allow Browser Control` + `Sub-Agent: Allow Web Search` + `Sub-Agent: Allow Browser Control`.
 
