@@ -8,12 +8,19 @@ import {
   type PromptPreprocessorController,
 } from "@lmstudio/sdk";
 import { readFile, writeFile } from "fs/promises";
-import { join } from "path";
+import { dirname, join } from "path";
 import { pluginConfigSchematics } from "./config";
 import { TOOLS_DOCUMENTATION } from "./toolsDocumentation";
 import { getPersistedState, savePersistedState } from "./stateManager";
 
 type DocumentContextInjectionStrategy = "none" | "inject-full-content" | "retrieval";
+
+export function getSubAgentDocsCandidatePaths(currentWorkingDirectory: string): string[] {
+  return [
+    join(dirname(__dirname), "subagent_docs.md"),
+    join(currentWorkingDirectory, "subagent_docs.md"),
+  ];
+}
 
 export async function promptPreprocessor(ctl: PromptPreprocessorController, userMessage: ChatMessage) {
   const userPrompt = userMessage.getText();
@@ -105,23 +112,31 @@ export async function promptPreprocessor(ctl: PromptPreprocessorController, user
   }
 
   if (enableSecondary && !state.subAgentDocsInjected) {
-      try {
-          const { currentWorkingDirectory } = state;
-          const subAgentDocsPath = join(currentWorkingDirectory, "subagent_docs.md");
-          // Attempt to read the docs file
-          const docsContent = await readFile(subAgentDocsPath, "utf-8");
-          
-          if (docsContent && docsContent.trim().length > 0) {
-              // Prepend or Append? Append to ensure it's fresh context.
-              currentContent += `\n\n---\n\n${docsContent}\n\n---\n\n`;
-              ctl.debug("subagent_docs.md injected into context.");
-              
-              // Update state so we don't inject again for this session/workspace
-              state.subAgentDocsInjected = true;
-              await savePersistedState(state);
+      const { currentWorkingDirectory } = state;
+      const candidatePaths = getSubAgentDocsCandidatePaths(currentWorkingDirectory);
+
+      let docsInjected = false;
+      for (const subAgentDocsPath of candidatePaths) {
+          try {
+              const docsContent = await readFile(subAgentDocsPath, "utf-8");
+              if (docsContent && docsContent.trim().length > 0) {
+                  // Prepend or Append? Append to ensure it's fresh context.
+                  currentContent += `\n\n---\n\n${docsContent}\n\n---\n\n`;
+                  ctl.debug(`subagent_docs.md injected into context from: ${subAgentDocsPath}`);
+
+                  // Update state so we don't inject again for this session/workspace
+                  state.subAgentDocsInjected = true;
+                  await savePersistedState(state);
+                  docsInjected = true;
+                  break;
+              }
+          } catch (e) {
+              // Keep trying fallback paths.
           }
-      } catch (e) {
-          ctl.debug("subagent_docs.md not found or failed to load. Skipping injection.");
+      }
+
+      if (!docsInjected) {
+          ctl.debug("subagent_docs.md not found or failed to load from plugin/workspace paths. Skipping injection.");
       }
   }
 
