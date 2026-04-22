@@ -931,6 +931,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         detached: true,
         stdio: "ignore",
         windowsHide: false,
+        windowsVerbatimArguments: true,
       });
       child.unref();
     } else {
