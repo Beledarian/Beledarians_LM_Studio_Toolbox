@@ -79,3 +79,37 @@ test("parses tool call from reasoning_content when content is empty", () => {
   assert.equal(parsed.toolCall.tool, "read_file");
   assert.equal(parsed.toolCall.args.file_name, "C:\\temp\\note.txt");
 });
+
+test("strips Thought: block with single newline separator", () => {
+  const parsed = parseSubAgentResponseMessage({
+    content: "Thought: This is reasoning\nActual response here",
+  });
+
+  assert.ok(!parsed.content.startsWith("Thought:"), "Should strip Thought: even without blank line");
+});
+
+test("strips Thought: block with no separator at end of string", () => {
+  const parsed = parseSubAgentResponseMessage({
+    content: "Thought: incomplete reasoning at end",
+  });
+
+  assert.ok(!parsed.content.startsWith("Thought:"), "Should strip incomplete Thought: block");
+});
+
+test("strips Thought for N seconds with single newline", () => {
+  const parsed = parseSubAgentResponseMessage({
+    content: "Thought for 2.5 seconds\nThe answer is 42",
+  });
+
+  assert.ok(!parsed.content.startsWith("Thought"), "Should strip thought preamble");
+  assert.ok(parsed.content.includes("42"), "Should preserve actual response");
+});
+
+test("handles mixed Thought: and tool call parsing", () => {
+  const parsed = parseSubAgentResponseMessage({
+    content: "Thought: Let me save this file\n\n{\"file_name\": \"test.txt\", \"content\": \"hello\"}",
+  });
+
+  assert.equal(parsed.toolCall.tool, "save_file");
+  assert.ok(!parsed.content.startsWith("Thought:"), "Should strip thought block");
+});

@@ -20,6 +20,17 @@ function sanitizeContent(text: string): string {
     .replace(/<\|tool_call\>/gi, "")
     .replace(/<tool_call\|>/gi, "")
     .replace(/<\|.*?\|>/g, "")
+    // Strip leading "Thought: ..." reasoning block emitted by DeepSeek-R1, QwQ, etc.
+    // These models embed their chain-of-thought in the content field prefixed with "Thought:",
+    // separated from the actual response by a blank line (or sometimes just a single newline).
+    // The regex matches "Thought:" followed by any content up to:
+    // - A blank line (\n\n or \r\n\r\n), OR
+    // - A single newline if no blank line exists, OR
+    // - End of string if there's no separator at all
+    .replace(/^Thought:[\s\S]*?(?:\n\n|\r\n\r\n|\n|$)/, "")
+    // Strip "Thought for N seconds" preamble emitted by thinking models (e.g. DeepSeek-R1, QwQ).
+    // Handles integers, decimals, and optional trailing whitespace/newlines.
+    .replace(/^Thought for [\d.]+ seconds?\s*/i, "")
     .trim();
 }
 
