@@ -510,20 +510,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         return { error: "Memory is currently disabled in the plugin settings. Please ask the user to enable it." };
       }
 
-      const candidateMemoryFiles = [
-        join(currentWorkingDirectory, ".beledarian", "memory.md"),
-        join(currentWorkingDirectory, "memory.md"),
-      ];
-
-      let memoryFile = candidateMemoryFiles[0];
-      for (const candidate of candidateMemoryFiles) {
-        try {
-          await stat(candidate);
-          memoryFile = candidate;
-          break;
-        } catch (e) { }
-      }
-
+      const memoryFile = join(currentWorkingDirectory, "memory.md");
       const timestamp = new Date().toISOString();
       const entry = `\n- [${timestamp}] ${fact}`;
 
@@ -533,9 +520,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
       } catch (error) {
         // If append fails (e.g. file doesn't exist), try writing
         try {
-          await mkdir(dirname(memoryFile), { recursive: true });
           await writeFile(memoryFile, "# Long-Term Memory\n" + entry, "utf-8");
-          return { success: true, message: `Fact saved to memory (new file created at ${memoryFile}).` };
+          return { success: true, message: "Fact saved to memory (new file created)." };
         } catch (writeError) {
           return { error: `Failed to save memory: ${writeError instanceof Error ? writeError.message : String(writeError)}` };
         }
@@ -2229,42 +2215,24 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           let currentSystemPrompt = "You are a helpful assistant.";
 
           // Load Instructions
-          let instructions = "";
-          const candidateInstructionsPaths = [
-            join(currentWorkingDirectory, ".beledarian", "SUB_AGENT_INSTRUCTIONS.md"),
-            join(currentWorkingDirectory, "instructions", "SUB_AGENT_INSTRUCTIONS.md"),
-            join(currentWorkingDirectory, "SUB_AGENT_INSTRUCTIONS.md"),
-          ];
-
-          for (const instructionsPath of candidateInstructionsPaths) {
-            try {
-              instructions = await readFile(instructionsPath, "utf-8");
-              if (instructions.trim()) break;
-            } catch (e) { }
-          }
-          if (instructions.trim()) currentSystemPrompt = instructions;
+          const instructionsPath = join(currentWorkingDirectory, "SUB_AGENT_INSTRUCTIONS.md");
+          try {
+            const instructions = await readFile(instructionsPath, "utf-8");
+            if (instructions.trim()) currentSystemPrompt = instructions;
+          } catch (e) { } // Ignore if instructions file doesn't exist
 
           // Inject Project Info
-          let projectInfo = "";
-          const candidateInfoPaths = [
-            join(currentWorkingDirectory, ".beledarian", "beledarian_info.md"),
-            join(currentWorkingDirectory, "beledarian_info.md"),
-          ];
-
-          for (const infoPath of candidateInfoPaths) {
-            try {
-              projectInfo = await readFile(infoPath, "utf-8");
-              if (projectInfo.trim()) break;
-            } catch (e) { }
-          }
-
-          if (projectInfo.trim()) {
-            currentSystemPrompt += `
+          const infoPath = join(currentWorkingDirectory, "beledarian_info.md");
+          try {
+            const projectInfo = await readFile(infoPath, "utf-8");
+            if (projectInfo.trim()) {
+              currentSystemPrompt += `
 
 ## ? Current Project Info (beledarian_info.md)
 ${projectInfo}
 `;
-          }
+            }
+          } catch (e) { } // Ignore if info file doesn't exist
 
           // Add current working directory to system prompt for context
           currentSystemPrompt += `
@@ -2874,25 +2842,14 @@ Always assume relative paths are from this directory.`;
 
 
           if (filesModified.length > 0 && allowFileSystem) {
-            const candidateInfoPaths = [
-              join(currentWorkingDirectory, ".beledarian", "beledarian_info.md"),
-              join(currentWorkingDirectory, "beledarian_info.md"),
-            ];
-            let infoPath = candidateInfoPaths[0];
-            for (const candidate of candidateInfoPaths) {
-              try { await stat(candidate); infoPath = candidate; break; } catch (e) { }
-            }
-
+            const infoPath = join(currentWorkingDirectory, "beledarian_info.md");
             const timestamp = new Date().toISOString();
             const logEntry = `\n- **[${timestamp}]** Task: "${taskPrompt.substring(0, 50)}..." | Modified: ${filesModified.join(", ")}`;
             try {
               await appendFile(infoPath, logEntry, "utf-8");
             } catch (e) {
               // If append fails, maybe file doesn't exist, try write
-              try {
-                await mkdir(dirname(infoPath), { recursive: true });
-                await writeFile(infoPath, `# Project History\n${logEntry}`, "utf-8");
-              } catch (e2) { }
+              try { await writeFile(infoPath, `# Project History\n${logEntry}`, "utf-8"); } catch (e2) { }
             }
           }
 
@@ -3302,13 +3259,12 @@ Always assume relative paths are from this directory.`;
 
       try {
         const ghArgs = ["issue", "list", "--state", state, "--limit", String(limit), "--json", "number,title,state,url,labels"];
-        
         if (labels) {
           for (const label of labels) {
             ghArgs.push("-l", label);
           }
         }
-
+        
         const child = spawn("gh", ghArgs);
         let stdout = "", stderr = "";
         child.stdout.on("data", d => stdout += d);
@@ -3340,11 +3296,11 @@ Always assume relative paths are from this directory.`;
 
       try {
         // Fallback to standard gh command for reliable JSON parsing of comments
-        const cmd = type === "issue" 
-          ? `gh issue view ${number} --json comments` 
-          : `gh pr view ${number} --json comments`;
+        const ghArgs = type === "issue" 
+          ? ["issue", "view", String(number), "--json", "comments"]
+          : ["pr", "view", String(number), "--json", "comments"];
 
-        const child = spawn(cmd, [], { shell: true });
+        const child = spawn("gh", ghArgs);
         let stdout = "", stderr = "";
         child.stdout.on("data", d => stdout += d);
         child.stderr.on("data", d => stderr += d);
@@ -3447,9 +3403,9 @@ Always assume relative paths are from this directory.`;
       if (typeof isInstalled === 'string') return { error: isInstalled };
 
       try {
-        const cmd = `gh pr diff ${number}`;
+        const ghArgs = ["pr", "diff", String(number)];
         
-        const child = spawn(cmd, [], { shell: true });
+        const child = spawn("gh", ghArgs);
         let stdout = "", stderr = "";
         child.stdout.on("data", d => stdout += d);
         child.stderr.on("data", d => stderr += d);
@@ -3477,9 +3433,10 @@ Always assume relative paths are from this directory.`;
       if (typeof isInstalled === 'string') return { error: isInstalled };
 
       try {
-        const cmd = branch ? `git push origin ${branch}` : "git push";
+        const gitArgs = ["push", "origin"];
+        if (branch) gitArgs.push(branch);
         
-        const child = spawn(cmd, [], { shell: true });
+        const child = spawn("git", gitArgs);
         let stdout = "", stderr = "";
         child.stdout.on("data", d => stdout += d);
         child.stderr.on("data", d => stderr += d);

@@ -10,13 +10,13 @@ describe('Sub-Agent Tool Validation', () => {
     });
 
     it('should fail with wrong parameter names (path instead of file_name)', () => {
-      const err = validateToolCall("save_file", { path: "C:\\Users\\Desktop\\test.html", data: "<html>" });
+      const err = validateToolCall("save_file", { path: "/tmp/test.html", data: "<html>" });
       assert.ok(err?.includes("missing required parameter") || err?.includes("requires parameters"));
       assert.ok(err?.includes("Hint: Use 'file_name'"));
     });
 
     it('should fail with absolute paths outside workspace', () => {
-      const err = validateToolCall("save_file", { file_name: "C:\\Users\\Desktop\\test.html", content: "<html>" });
+      const err = validateToolCall("save_file", { file_name: "/tmp/test.html", content: "<html>" });
       assert.ok(err?.includes("rejected absolute path"));
       assert.ok(err?.includes("SECURITY"));
     });
@@ -51,7 +51,6 @@ describe('Sub-Agent Tool Validation', () => {
 
   describe('replace_text_in_file validation', () => {
     it('should pass with all required parameters', () => {
-      // Note: replace logic is slightly different in the actual code, but we test the concept of missing params
       const args = { file_name: "test.txt", old_string: "a", new_string: "b" };
       assert.ok(args.file_name && args.old_string && args.new_string);
     });
@@ -78,13 +77,14 @@ describe('Sub-Agent Tool Validation', () => {
       assert.ok(err?.includes("Hint: Use 'file_name' (not 'path', 'filepath', or 'file_path')"));
     });
 
-    it('should detect absolute paths on Windows style', () => {
-      const err = validateToolCall("save_file", { file_name: "C:\\Users\\Laurin\\Desktop\\test.html", content: "<html>" });
+    it('should detect absolute paths on Unix style', () => {
+      const err = validateToolCall("save_file", { file_name: "/home/user/test.html", content: "<html>" });
       assert.ok(err?.includes("rejected absolute path"));
     });
 
-    it('should detect absolute paths on Unix style', () => {
-      const err = validateToolCall("save_file", { file_name: "/home/user/test.html", content: "<html>" });
+    it('should detect absolute paths with forward slashes (cross-platform)', () => {
+      // Forward slash paths work on both Linux and Windows via Node isAbsolute()
+      const err = validateToolCall("save_file", { file_name: "/var/log/test.html", content: "<html>" });
       assert.ok(err?.includes("rejected absolute path"));
     });
   });
