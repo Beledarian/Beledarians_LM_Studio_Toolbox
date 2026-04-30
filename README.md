@@ -32,7 +32,7 @@ This project is a plugin for [LM Studio](https://lmstudio.ai/) that provides a r
 - **💬 Better Error Feedback:** Sub-agents now receive `TOOL_VALIDATION_ERROR` messages with helpful hints about correct parameter names vs common mistakes
 
 <details>
-<summary><strong>v1.1.x Changes</strong></summary>
+<summary><strong>v1.1.x & Earlier Changes</strong></summary>
 
 ### v1.1.1 (2026-04-08)
 **Browser Reliability and Navigation Context**
@@ -50,11 +50,6 @@ This project is a plugin for [LM Studio](https://lmstudio.ai/) that provides a r
 - **Added:** Structured sub-agent handoff message support (`handoff_message`) for relay/summary workflows
 - **Added:** Enable Sub-Agent Debug Logging toggle in plugin settings
 - **Added:** Support for direct `{file_name, content}` JSON format from some models
-
-</details>
-
-<details>
-<summary><strong>v1.0.x & Earlier Changes</strong></summary>
 
 ### v1.0.x Previous Updates
 - **Smart Context Injection:** `subagent_docs.md` is automatically loaded into the context
