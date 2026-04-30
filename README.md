@@ -17,6 +17,10 @@ This project is a plugin for [LM Studio](https://lmstudio.ai/) that provides a r
 - **Batch Processing:** `save_file` supports creating multiple files in one go.
 - **Cleanup:** Use `delete_files_by_pattern` to wipe temporary files instantly.
 
+> **Encountering issues?** Feel free to [submit them on GitHub](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox/issues).
+>
+> **Find this project helpful?** Consider [giving it a ⭐ on GitHub](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox) or [contributing!](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox/tree/main?tab=contributing-ov-file) Thank you for using the toolbox.
+
 
 ### Recent Updates (v1.3.0)
 
@@ -32,7 +36,7 @@ This project is a plugin for [LM Studio](https://lmstudio.ai/) that provides a r
 - **💬 Better Error Feedback:** Sub-agents now receive `TOOL_VALIDATION_ERROR` messages with helpful hints about correct parameter names vs common mistakes
 
 <details>
-<summary><strong>v1.1.x Changes</strong></summary>
+<summary><strong>v1.1.x & Earlier Changes</strong></summary>
 
 ### v1.1.1 (2026-04-08)
 **Browser Reliability and Navigation Context**
@@ -51,11 +55,6 @@ This project is a plugin for [LM Studio](https://lmstudio.ai/) that provides a r
 - **Added:** Enable Sub-Agent Debug Logging toggle in plugin settings
 - **Added:** Support for direct `{file_name, content}` JSON format from some models
 
-</details>
-
-<details>
-<summary><strong>v1.0.x & Earlier Changes</strong></summary>
-
 ### v1.0.x Previous Updates
 - **Smart Context Injection:** `subagent_docs.md` is automatically loaded into the context
 - **Enhanced Reporting:** Fixed file path reporting in `consult_secondary_agent`
@@ -64,13 +63,6 @@ This project is a plugin for [LM Studio](https://lmstudio.ai/) that provides a r
 
 </details>
 
-[📋 View Full Changelog](#changelog)
-
-
-
-> **Encountering issues?** Feel free to [submit them on GitHub](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox/issues).
->
-> **Find this project helpful?** Consider [giving it a ⭐ on GitHub](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox) or [contributing!](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox/tree/main?tab=contributing-ov-file) Thank you for using the toolbox.
 
 ### Autonomous Agents
 
@@ -200,50 +192,3 @@ Access these settings in the LM Studio "Plugins" tab:
 ## Developer Guide
 
 See [CODE_OVERVIEW.md](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox/blob/main/CODE_OVERVIEW.md) for architectural details.
-
----
-
-## Changelog
-
-### v1.2.0 (2026-04-30)
-**Sub-Agent Tool Validation & Reliability**
-
-- **Added:** Early parameter validation for sub-agent tool calls to prevent silent failures
-- **Added:** Clear `TOOL_VALIDATION_ERROR` messages with helpful hints about correct parameter names vs common mistakes (e.g., `file_name` vs `path`)
-- **Added:** Workspace path security checks that reject absolute paths outside the workspace directory with explicit error feedback
-- **Added:** 14 new regression tests for tool call validation logic (total test count: 51)
-- **Improved:** Sub-agents now receive actionable error messages allowing them to self-correct and retry with valid parameters
-
-<details>
-<summary><strong>v1.1.x Changes</strong></summary>
-
-### v1.1.1 (2026-04-08)
-**Browser Reliability and Navigation Context**
-
-- **Fixed:** Browser action clicks now include a DOM-level fallback when Puppeteer reports "Node is either not clickable or not an Element"
-- **Improved:** Browser click actions now retry native click after ~300ms before falling back
-- **Added:** `browser_session_open` returns full page text by default (`include_page_text` defaults to true)
-- **Refined:** Multi-step routing guidance now prioritizes `browser_session_open -> browser_session_control -> browser_session_close`
-
-### v1.1.0 (2026-04-08)
-**Sub-Agent Compatibility Improvements**
-
-- **Fixed:** Gemma 4 and other models using `{"tool": "...", "parameters": {...}}` format now work correctly with `consult_secondary_agent`
-- **Added:** Advanced browser navigation (`browser_session_open`, `browser_session_control`, `browser_session_close`) including in-page fuzzy find and URL-change notices
-- **Added:** Structured sub-agent handoff message support (`handoff_message`) for relay/summary workflows
-- **Added:** Enable Sub-Agent Debug Logging toggle in plugin settings
-- **Added:** Support for direct `{file_name, content}` JSON format from some models
-
-</details>
-
-<details>
-<summary><strong>v1.0.x & Earlier Changes</strong></summary>
-
-### v1.0.x Previous Updates
-- **Smart Context Injection:** `subagent_docs.md` is automatically loaded into the context
-- **Enhanced Reporting:** Fixed file path reporting in `consult_secondary_agent`
-- **Project Tracking:** Sub-agents enforce creation of `beledarian_info.md`
-- **Strict Naming:** Improved instructions for correct file extensions
-
-</details>
-
