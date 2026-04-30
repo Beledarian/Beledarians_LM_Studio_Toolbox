@@ -2310,6 +2310,18 @@ Always assume relative paths are from this directory.`;
                 executedToolCallCount++;
                 msgList.push({ role: "assistant", content: content });
                 let toolResult = "";
+                let toolValidationError: string | null = null;
+
+                // --- Parameter Validation Helper ---
+                const validateRequiredParams = (toolName: string, requiredParams: string[], providedArgs: Record<string, any> = {}): string | null => {
+                  const missing = requiredParams.filter(p => !(p in providedArgs));
+                  if (missing.length > 0) {
+                    const availableKeys = Object.keys(providedArgs).join(", ") || "none";
+                    return `Tool '${toolName}' requires parameters: [${requiredParams.join(", ")}]. Missing: [${missing.join(", ")}]. Provided keys: ${availableKeys}.`;
+                  }
+                  return null;
+                };
+
                 try {
                   // --- File System ---
                   if (allowFileSystem) {
