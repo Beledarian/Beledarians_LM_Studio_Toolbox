@@ -2323,6 +2323,50 @@ Always assume relative paths are from this directory.`;
                 };
 
                 try {
+                  // --- Early Parameter Validation (catches wrong param names + absolute paths) ---
+                  const args = toolCall.args || {};
+                  
+                  if (toolCall.tool === "save_file" && allowFileSystem) {
+                    const fileName = args.file_name || args.name;
+                    const fileContent = args.content || args.data;
+                    
+                    if (!fileName && !fileContent) {
+                      toolValidationError = `Tool 'save_file' requires parameters: [file_name, content]. Provided keys: ${Object.keys(args).join(", ") || "none"}. Hint: Use 'file_name' (not 'path', 'filepath', or 'file_path') and 'content' (not 'data').`;
+                    } else if (!fileName) {
+                      toolValidationError = `Tool 'save_file' missing required parameter: 'file_name'. Provided keys: ${Object.keys(args).join(", ")}. Hint: Use 'file_name' not 'path' or 'filepath'.`;
+                    } else if (!fileContent) {
+                      toolValidationError = `Tool 'save_file' missing required parameter: 'content'. Provided keys: ${Object.keys(args).join(", ")}. Hint: Use 'content' not 'data'.`;
+                    } else if (isAbsolute(fileName)) {
+                      toolValidationError = `Tool 'save_file' rejected absolute path: '${fileName}'. SECURITY: Files can only be saved within workspace: ${currentWorkingDirectory}. Use relative path like 'test.html'.`;
+                    }
+                  }
+                  
+                  if (toolCall.tool === "read_file" && allowFileSystem) {
+                    const fileName = args.file_name;
+                    if (!fileName) {
+                      toolValidationError = `Tool 'read_file' requires parameter: [file_name]. Provided keys: ${Object.keys(args).join(", ") || "none"}.`;
+                    } else if (isAbsolute(fileName)) {
+                      toolValidationError = `Tool 'read_file' rejected absolute path. SECURITY: Only workspace paths allowed.`;
+                    }
+                  }
+                  
+                  if (toolCall.tool === "replace_text_in_file" && allowFileSystem) {
+                    const missing = [];
+                    if (!args.file_name) missing.push("file_name");
+                    if (!args.old_string) missing.push("old_string");
+                    if (!args.new_string) missing.push("new_string");
+                    if (missing.length > 0) {
+                      toolValidationError = `Tool 'replace_text_in_file' missing parameters: [${missing.join(", ")}]. Provided keys: ${Object.keys(args).join(", ") || "none"}.`;
+                    } else if (isAbsolute(args.file_name)) {
+                      toolValidationError = `Tool 'replace_text_in_file' rejected absolute path. SECURITY: Only workspace paths allowed.`;
+                    }
+                  }
+                  
+                  // If validation failed, return error immediately so subagent can retry
+                  if (toolValidationError) {
+                    toolResult = `TOOL_VALIDATION_ERROR: ${toolValidationError}`;
+                  } else {
+
                   // --- File System ---
                   if (allowFileSystem) {
                     if (toolCall.tool === "read_file" && toolCall.args?.file_name) {
@@ -2553,6 +2597,8 @@ Always assume relative paths are from this directory.`;
                   }
 
                   if (!toolResult) toolResult = "Error: Tool not found/allowed.";
+                  } // Close the else { block from validation check
+
                 } catch (err: any) { toolResult = `Error: ${err.message}`; }
 
                 msgList.push({ role: "user", content: `Tool Output: ${toolResult}` });
