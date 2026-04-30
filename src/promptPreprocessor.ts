@@ -18,6 +18,8 @@ type DocumentContextInjectionStrategy = "none" | "inject-full-content" | "retrie
 export function getSubAgentDocsCandidatePaths(currentWorkingDirectory: string): string[] {
   return [
     join(dirname(__dirname), "subagent_docs.md"),
+    join(dirname(__dirname), "instructions", "subagent_docs.md"),
+    join(currentWorkingDirectory, "instructions", "subagent_docs.md"),
     join(currentWorkingDirectory, "subagent_docs.md"),
   ];
 }
@@ -81,6 +83,18 @@ export async function promptPreprocessor(ctl: PromptPreprocessorController, user
   const frequency = pluginConfig.get("subAgentFrequency");
   const debugMode = pluginConfig.get("enableDebugMode");
 
+  // --- Plan Mode Instructions ---
+  const planMode = pluginConfig.get("planMode");
+  
+  let planHint = "";
+  
+  if (planMode === "always") {
+      planHint = "\n\n**PLAN MODE [ACTIVE]:** Before making ANY file changes or implementing features, you MUST:\n1. **EXPLORE:** Use `list_directory`, `read_file`, and other exploration tools to understand the codebase structure.\n2. **PROPOSE:** Present a clear, step-by-step plan outlining what you will do and why.\n3. **WAIT:** Do NOT start implementing until the user approves your plan or gives explicit permission to proceed.\n\n**Exception:** Simple conversations, clarifications, or trivial single-line edits do not require planning.";
+  } else if (planMode === "when_useful") {
+      planHint = "\n\n**PLAN MODE [When Useful]:** For larger, complex, or ambiguous requests:\n1. **EXPLORE FIRST:** Use `list_directory`, `read_file` to understand the codebase before making changes.\n2. **PROPOSE A PLAN:** Outline your approach and key steps before implementing.\n3. **SKIP FOR SIMPLE TASKS:** Normal conversations or small edits (e.g., typo fixes, single function changes) do not require planning.";
+  }
+
+
   let delegationHint = "";
 
   if (frequency === "always") {
@@ -100,6 +114,12 @@ export async function promptPreprocessor(ctl: PromptPreprocessorController, user
   if (delegationHint) {
       currentContent += delegationHint;
   }
+
+  // Append plan hint if enabled
+  if (planHint) {
+      currentContent += planHint;
+  }
+
 
   // --- Sub-Agent Documentation Injection (Startup OR On-Enable) ---
   const enableSecondary = pluginConfig.get("enableSecondaryAgent");
@@ -146,20 +166,52 @@ export async function promptPreprocessor(ctl: PromptPreprocessorController, user
 
     try {
         const { currentWorkingDirectory } = state;
-        const startupPath = join(currentWorkingDirectory, "startup.md");
-        const startupContent = await readFile(startupPath, "utf-8");
-        const filesToRead = startupContent.split('\n').map(f => f.trim()).filter(f => f);
+        const candidateStartupPaths = [
+            join(currentWorkingDirectory, ".beledarian", "startup.md"),
+            join(currentWorkingDirectory, "instructions", "startup.md"),
+            join(currentWorkingDirectory, "startup.md"),
+        ];
 
-        for (const file of filesToRead) {
-            const filePath = join(currentWorkingDirectory, file);
+        let startupContent = "";
+        let usedStartupPath = "";
+        for (const startupPath of candidateStartupPaths) {
             try {
-                const fileContent = await readFile(filePath, "utf-8");
-                if (fileContent.trim().length > 0) {
-                    injectionContent = `\n\n---\n\n${fileContent}\n\n---\n\n${injectionContent}`;
-                    ctl.debug(`${file} loaded and injected into context.`);
-                }
+                startupContent = await readFile(startupPath, "utf-8");
+                usedStartupPath = dirname(startupPath);
+                ctl.debug(`startup.md loaded from: ${startupPath}`);
+                break;
             } catch (e) {
-                ctl.debug(`Failed to load ${file} from startup.md.`);
+                // Keep trying
+            }
+        }
+
+        if (startupContent) {
+            const filesToRead = startupContent.split('\n').map(f => f.trim()).filter(f => f);
+
+            for (const file of filesToRead) {
+                // Try relative to startup.md folder first, then relative to CWD
+                const candidateFilePaths = [
+                    join(usedStartupPath, file),
+                    join(currentWorkingDirectory, file),
+                ];
+
+                let loaded = false;
+                for (const filePath of candidateFilePaths) {
+                    try {
+                        const fileContent = await readFile(filePath, "utf-8");
+                        if (fileContent.trim().length > 0) {
+                            injectionContent = `\n\n---\n\n${fileContent}\n\n---\n\n${injectionContent}`;
+                            ctl.debug(`${file} loaded and injected into context from ${filePath}.`);
+                            loaded = true;
+                            break;
+                        }
+                    } catch (e) {
+                        // Keep trying
+                    }
+                }
+                if (!loaded) {
+                    ctl.debug(`Failed to load ${file} from startup.md.`);
+                }
             }
         }
     } catch (e) {

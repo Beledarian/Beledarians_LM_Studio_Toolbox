@@ -17,19 +17,52 @@ This project is a plugin for [LM Studio](https://lmstudio.ai/) that provides a r
 - **Batch Processing:** `save_file` supports creating multiple files in one go.
 - **Cleanup:** Use `delete_files_by_pattern` to wipe temporary files instantly.
 
-### Recent Updates
-
-- **v1.1.1 Browser Reliability:** Added robust click fallback handling for selectors like `a.Link--primary` when Puppeteer reports non-clickable nodes.
-- **v1.1.1 Navigation Context:** `browser_session_open` now returns full page text by default for better multi-step planning.
-- **Gemma 4 Compatibility:** Fixed sub-agent tool call parsing for models using `parameters` format (e.g., Gemma 4)
-- **Advanced Browser Navigation:** Added persistent browser session tools with scripted actions, in-page fuzzy find, and URL-change notices
-- **Structured Sub-Agent Handoff:** Added explicit `handoff_message` support for relaying findings/research
-
-[📋 View Full Changelog](#changelog)
-
 > **Encountering issues?** Feel free to [submit them on GitHub](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox/issues).
 >
 > **Find this project helpful?** Consider [giving it a ⭐ on GitHub](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox) or [contributing!](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox/tree/main?tab=contributing-ov-file) Thank you for using the toolbox.
+
+
+### Recent Updates (v1.3.0)
+
+- **🐙 Native GitHub CLI Tools:** Added `gh_auth`, `gh_create_issue`, `gh_list_issues`, `gh_view_comments`, `gh_create_pr`, `gh_list_prs`, `gh_view_pr_diff`, and `gh_push` for secure, structured GitHub interactions without generic shell commands
+- **🌿 Enhanced Git Workflow:** Added `git_add` and `git_checkout` tools to complete the native git toolchain (status, diff, log, commit, add, checkout)
+- **⚙️ New Sidebar Toggle:** Added "Allow GitHub CLI Tools" setting to enable/disable `gh_*` tools independently
+- **🛡️ Dependency Guards:** All CLI tools now verify installation before execution and provide clear prompts if missing
+
+### Recent Updates (v1.2.0)
+
+- **🛡️ Sub-Agent Tool Validation:** Added early parameter validation with clear error messages to prevent silent failures when sub-agents use wrong parameter names or absolute paths outside workspace
+- **🧪 Regression Tests:** Added 14 new tests for tool call validation logic (total: 51 tests)
+- **💬 Better Error Feedback:** Sub-agents now receive `TOOL_VALIDATION_ERROR` messages with helpful hints about correct parameter names vs common mistakes
+
+<details>
+<summary><strong>v1.1.x & Earlier Changes</strong></summary>
+
+### v1.1.1 (2026-04-08)
+**Browser Reliability and Navigation Context**
+
+- **Fixed:** Browser action clicks now include a DOM-level fallback when Puppeteer reports "Node is either not clickable or not an Element"
+- **Improved:** Browser click actions now retry native click after ~300ms before falling back
+- **Added:** `browser_session_open` returns full page text by default (`include_page_text` defaults to true)
+- **Refined:** Multi-step routing guidance now prioritizes `browser_session_open -> browser_session_control -> browser_session_close`
+
+### v1.1.0 (2026-04-08)
+**Sub-Agent Compatibility Improvements**
+
+- **Fixed:** Gemma 4 and other models using `{"tool": "...", "parameters": {...}}` format now work correctly with `consult_secondary_agent`
+- **Added:** Advanced browser navigation (`browser_session_open`, `browser_session_control`, `browser_session_close`) including in-page fuzzy find and URL-change notices
+- **Added:** Structured sub-agent handoff message support (`handoff_message`) for relay/summary workflows
+- **Added:** Enable Sub-Agent Debug Logging toggle in plugin settings
+- **Added:** Support for direct `{file_name, content}` JSON format from some models
+
+### v1.0.x Previous Updates
+- **Smart Context Injection:** `subagent_docs.md` is automatically loaded into the context
+- **Enhanced Reporting:** Fixed file path reporting in `consult_secondary_agent`
+- **Project Tracking:** Sub-agents enforce creation of `beledarian_info.md`
+- **Strict Naming:** Improved instructions for correct file extensions
+
+</details>
+
 
 ### Autonomous Agents
 
@@ -159,30 +192,3 @@ Access these settings in the LM Studio "Plugins" tab:
 ## Developer Guide
 
 See [CODE_OVERVIEW.md](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox/blob/main/CODE_OVERVIEW.md) for architectural details.
-
----
-
-## Changelog
-
-### v1.1.1 (2026-04-08)
-**Browser Reliability and Navigation Context**
-
-- **Fixed:** Browser action clicks now include a DOM-level fallback when Puppeteer reports "Node is either not clickable or not an Element"
-- **Improved:** Browser click actions now retry native click after ~300ms before falling back
-- **Added:** `browser_session_open` returns full page text by default (`include_page_text` defaults to true)
-- **Refined:** Multi-step routing guidance now prioritizes `browser_session_open -> browser_session_control -> browser_session_close`
-
-### v1.1.0 (2026-04-08)
-**Sub-Agent Compatibility Improvements**
-
-- **Fixed:** Gemma 4 and other models using `{"tool": "...", "parameters": {...}}` format now work correctly with `consult_secondary_agent`
-- **Added:** Advanced browser navigation (`browser_session_open`, `browser_session_control`, `browser_session_close`) including in-page fuzzy find and URL-change notices
-- **Added:** Structured sub-agent handoff message support (`handoff_message`) for relay/summary workflows
-- **Added:** Enable Sub-Agent Debug Logging toggle in plugin settings
-- **Added:** Support for direct `{file_name, content}` JSON format from some models
-
-### Previous Updates
-- **Smart Context Injection:** `subagent_docs.md` is automatically loaded into the context
-- **Enhanced Reporting:** Fixed file path reporting in `consult_secondary_agent`
-- **Project Tracking:** Sub-agents enforce creation of `beledarian_info.md`
-- **Strict Naming:** Improved instructions for correct file extensions
