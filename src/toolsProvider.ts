@@ -2831,5 +2831,183 @@ Always assume relative paths are from this directory.`;
   });
   tools.push(consultSecondaryAgentTool);
 
+
+  // --- Issue #13: Enhanced File Editing Tools ---
+
+  const insertAtLineTool = tool({
+    name: "insert_at_line",
+    description: text`
+      Insert content at a specific line number in a file. 
+      The line_number is 1-indexed (line 1 is the first line).
+      Existing content at that line and below will be pushed down.
+    `,
+    parameters: {
+      file_name: z.string(),
+      line_number: z.number().int().min(1).describe("The line number to insert at (1-indexed)"),
+      content_to_insert: z.string().describe("The text content to insert at the specified line"),
+    },
+    implementation: async ({ file_name, line_number, content_to_insert }) => {
+      try {
+        const filePath = validatePath(currentWorkingDirectory, file_name);
+        let content = "";
+        try {
+          content = await readFile(filePath, "utf-8");
+        } catch {
+          if (line_number !== 1) {
+            return { error: `File '${file_name}' does not exist. Can only insert at line 1 in a new file.` };
+          }
+        }
+        
+        const lines = content.split("\n");
+        const insertIndex = Math.min(line_number - 1, lines.length);
+        lines.splice(insertIndex, 0, content_to_insert);
+        
+        await writeFile(filePath, lines.join("\n"), "utf-8");
+        return { 
+          success: true, 
+          message: `Inserted ${content_to_insert.split('\n').length} line(s) at line ${line_number} in ${file_name}`,
+          new_line_count: lines.length 
+        };
+      } catch (e) {
+        return { error: `Failed to insert text: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    },
+  });
+  tools.push(insertAtLineTool);
+
+  const appendFileTool = tool({
+    name: "append_file",
+    description: text`
+      Append content to the end of a file. 
+      If the file doesn't exist, it will be created.
+      Useful for adding logs, entries, or building files incrementally.
+    `,
+    parameters: {
+      file_name: z.string(),
+      content: z.string().describe("The text content to append to the file"),
+    },
+    implementation: async ({ file_name, content }) => {
+      try {
+        const filePath = validatePath(currentWorkingDirectory, file_name);
+        await mkdir(dirname(filePath), { recursive: true });
+        await appendFile(filePath, content, "utf-8");
+        return { 
+          success: true, 
+          message: `Content appended to ${file_name}` 
+        };
+      } catch (e) {
+        return { error: `Failed to append to file: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    },
+  });
+  tools.push(appendFileTool);
+
+  const readFileRangeTool = tool({
+    name: "read_file_range",
+    description: text`
+      Read a specific range of lines from a file. 
+      Returns the content with line numbers for easy reference.
+      Line numbers are 1-indexed (line 1 is the first line).
+    `,
+    parameters: {
+      file_name: z.string(),
+      start_line: z.number().int().min(1).describe("Starting line number (1-indexed)"),
+      end_line: z.number().int().min(1).describe("Ending line number (1-indexed, inclusive)"),
+    },
+    implementation: async ({ file_name, start_line, end_line }) => {
+      try {
+        const filePath = validatePath(currentWorkingDirectory, file_name);
+        const content = await readFile(filePath, "utf-8");
+        const lines = content.split("\n");
+        
+        if (start_line > lines.length) {
+          return { error: `Start line ${start_line} is beyond the end of the file (${lines.length} lines)` };
+        }
+        
+        const actualEndLine = Math.min(end_line, lines.length);
+        const selectedLines = lines.slice(start_line - 1, actualEndLine);
+        
+        const numberedContent = selectedLines.map((line, idx) => 
+          `${start_line + idx}: ${line}`
+        ).join("\n");
+        
+        return {
+          file_name: file_name,
+          start_line: start_line,
+          end_line: actualEndLine,
+          line_count: selectedLines.length,
+          content_with_line_numbers: numberedContent,
+        };
+      } catch (e) {
+        return { error: `Failed to read file range: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    },
+  });
+  tools.push(readFileRangeTool);
+
+  const searchInFileTool = tool({
+    name: "search_in_file",
+    description: text`
+      Search for a pattern within a single file (grep-like functionality).
+      Returns matching lines with their line numbers.
+      The pattern can be a simple substring or a regex pattern.
+    `,
+    parameters: {
+      file_name: z.string(),
+      pattern: z.string().describe("Search pattern (substring or regex)"),
+      case_sensitive: z.boolean().optional().default(false).describe("Whether the search is case-sensitive (default: false)"),
+      use_regex: z.boolean().optional().default(false).describe("Whether to treat pattern as a regex (default: false, treats as literal substring)"),
+    },
+    implementation: async ({ file_name, pattern, case_sensitive = false, use_regex = false }) => {
+      try {
+        const filePath = validatePath(currentWorkingDirectory, file_name);
+        const content = await readFile(filePath, "utf-8");
+        const lines = content.split("\n");
+        
+        let matches: Array<{ line_number: number; content: string }> = [];
+        
+        for (let i = 0; i < lines.length; i++) {
+          let line = lines[i];
+          let searchPattern = pattern;
+          
+          if (!case_sensitive) {
+            line = line.toLowerCase();
+            searchPattern = pattern.toLowerCase();
+          }
+          
+          let isMatch = false;
+          if (use_regex) {
+            try {
+              const regex = new RegExp(searchPattern);
+              isMatch = regex.test(line);
+            } catch (e) {
+              return { error: `Invalid regex pattern: ${e instanceof Error ? e.message : String(e)}` };
+            }
+          } else {
+            isMatch = line.includes(searchPattern);
+          }
+          
+          if (isMatch) {
+            matches.push({
+              line_number: i + 1,
+              content: lines[i],
+            });
+          }
+        }
+        
+        return {
+          file_name: file_name,
+          pattern: pattern,
+          match_count: matches.length,
+          matches: matches.slice(0, 100),
+          note: matches.length > 100 ? `Showing first 100 of ${matches.length} matches` : undefined,
+        };
+      } catch (e) {
+        return { error: `Failed to search file: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    },
+  });
+  tools.push(searchInFileTool);
+
   return tools;
 }
