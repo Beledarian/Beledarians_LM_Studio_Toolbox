@@ -18,6 +18,8 @@ type DocumentContextInjectionStrategy = "none" | "inject-full-content" | "retrie
 export function getSubAgentDocsCandidatePaths(currentWorkingDirectory: string): string[] {
   return [
     join(dirname(__dirname), "subagent_docs.md"),
+    join(dirname(__dirname), "instructions", "subagent_docs.md"),
+    join(currentWorkingDirectory, "instructions", "subagent_docs.md"),
     join(currentWorkingDirectory, "subagent_docs.md"),
   ];
 }
@@ -164,20 +166,52 @@ export async function promptPreprocessor(ctl: PromptPreprocessorController, user
 
     try {
         const { currentWorkingDirectory } = state;
-        const startupPath = join(currentWorkingDirectory, "startup.md");
-        const startupContent = await readFile(startupPath, "utf-8");
-        const filesToRead = startupContent.split('\n').map(f => f.trim()).filter(f => f);
+        const candidateStartupPaths = [
+            join(currentWorkingDirectory, ".beledarian", "startup.md"),
+            join(currentWorkingDirectory, "instructions", "startup.md"),
+            join(currentWorkingDirectory, "startup.md"),
+        ];
 
-        for (const file of filesToRead) {
-            const filePath = join(currentWorkingDirectory, file);
+        let startupContent = "";
+        let usedStartupPath = "";
+        for (const startupPath of candidateStartupPaths) {
             try {
-                const fileContent = await readFile(filePath, "utf-8");
-                if (fileContent.trim().length > 0) {
-                    injectionContent = `\n\n---\n\n${fileContent}\n\n---\n\n${injectionContent}`;
-                    ctl.debug(`${file} loaded and injected into context.`);
-                }
+                startupContent = await readFile(startupPath, "utf-8");
+                usedStartupPath = dirname(startupPath);
+                ctl.debug(`startup.md loaded from: ${startupPath}`);
+                break;
             } catch (e) {
-                ctl.debug(`Failed to load ${file} from startup.md.`);
+                // Keep trying
+            }
+        }
+
+        if (startupContent) {
+            const filesToRead = startupContent.split('\n').map(f => f.trim()).filter(f => f);
+
+            for (const file of filesToRead) {
+                // Try relative to startup.md folder first, then relative to CWD
+                const candidateFilePaths = [
+                    join(usedStartupPath, file),
+                    join(currentWorkingDirectory, file),
+                ];
+
+                let loaded = false;
+                for (const filePath of candidateFilePaths) {
+                    try {
+                        const fileContent = await readFile(filePath, "utf-8");
+                        if (fileContent.trim().length > 0) {
+                            injectionContent = `\n\n---\n\n${fileContent}\n\n---\n\n${injectionContent}`;
+                            ctl.debug(`${file} loaded and injected into context from ${filePath}.`);
+                            loaded = true;
+                            break;
+                        }
+                    } catch (e) {
+                        // Keep trying
+                    }
+                }
+                if (!loaded) {
+                    ctl.debug(`Failed to load ${file} from startup.md.`);
+                }
             }
         }
     } catch (e) {
