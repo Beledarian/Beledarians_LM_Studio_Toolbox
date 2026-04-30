@@ -1,6 +1,10 @@
 import { createConfigSchematics } from "@lmstudio/sdk";
 
 export const pluginConfigSchematics = createConfigSchematics()
+  .field("planMode", "string", {
+    displayName: "Plan Mode",
+    subtitle: "Controls when the model should explore and propose a plan before making changes. Options: 'always', 'when_useful', 'never'.",
+  }, "when_useful")
   .field("retrievalLimit", "numeric", {
     int: true,
     min: 1,

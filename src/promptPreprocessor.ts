@@ -81,6 +81,18 @@ export async function promptPreprocessor(ctl: PromptPreprocessorController, user
   const frequency = pluginConfig.get("subAgentFrequency");
   const debugMode = pluginConfig.get("enableDebugMode");
 
+  // --- Plan Mode Instructions ---
+  const planMode = pluginConfig.get("planMode");
+  
+  let planHint = "";
+  
+  if (planMode === "always") {
+      planHint = "\n\n**PLAN MODE [ACTIVE]:** Before making ANY file changes or implementing features, you MUST:\n1. **EXPLORE:** Use `list_directory`, `read_file`, and other exploration tools to understand the codebase structure.\n2. **PROPOSE:** Present a clear, step-by-step plan outlining what you will do and why.\n3. **WAIT:** Do NOT start implementing until the user approves your plan or gives explicit permission to proceed.\n\n**Exception:** Simple conversations, clarifications, or trivial single-line edits do not require planning.";
+  } else if (planMode === "when_useful") {
+      planHint = "\n\n**PLAN MODE [When Useful]:** For larger, complex, or ambiguous requests:\n1. **EXPLORE FIRST:** Use `list_directory`, `read_file` to understand the codebase before making changes.\n2. **PROPOSE A PLAN:** Outline your approach and key steps before implementing.\n3. **SKIP FOR SIMPLE TASKS:** Normal conversations or small edits (e.g., typo fixes, single function changes) do not require planning.";
+  }
+
+
   let delegationHint = "";
 
   if (frequency === "always") {
@@ -100,6 +112,12 @@ export async function promptPreprocessor(ctl: PromptPreprocessorController, user
   if (delegationHint) {
       currentContent += delegationHint;
   }
+
+  // Append plan hint if enabled
+  if (planHint) {
+      currentContent += planHint;
+  }
+
 
   // --- Sub-Agent Documentation Injection (Startup OR On-Enable) ---
   const enableSecondary = pluginConfig.get("enableSecondaryAgent");
