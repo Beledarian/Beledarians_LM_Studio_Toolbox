@@ -46,6 +46,8 @@ export const TOOLS_DOCUMENTATION = [
   '- `git_diff(file_path?, cached?)`: See changes in detail.',
   '- `git_commit(message)`: Commit staged changes.',
   '- `git_log(max_count?)`: View commit history.',
+   '- `git_add(paths?)`: Stage specific files or all changes for the next commit.',
+   '- `git_checkout(branch_name, create_new?)`: Switch to an existing branch or create and switch to a new one.',
   '',
   '###  Advanced File Tools',
   '- `read_document(file_path)`: Parse text from .pdf or .docx files.',
