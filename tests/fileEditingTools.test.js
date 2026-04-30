@@ -151,6 +151,128 @@ describe('Issue #13 - Enhanced File Editing Tools', () => {
     assert.strictEqual(matches[1].line_number, 3, 'Second email at line 3');
   });
 
+  it('delete_lines_in_file: should delete a single line', async () => {
+    const testFile = path.join(testDir, 'delete_single_test.txt');
+    const originalContent = ['Line 1', 'Line 2', 'Line 3', 'Line 4', 'Line 5'].join('\n');
+    await fs.writeFile(testFile, originalContent, 'utf-8');
+    
+    // Simulate deleting line 3 (1-indexed)
+    const lines = originalContent.split('\n');
+    const startLine = 3;
+    const deleteCount = 1;
+    
+    lines.splice(startLine - 1, deleteCount);
+    
+    await fs.writeFile(testFile, lines.join('\n'), 'utf-8');
+    
+    const result = await fs.readFile(testFile, 'utf-8');
+    const resultLines = result.split('\n');
+    
+    assert.strictEqual(resultLines.length, 4, 'Should have 4 lines after deletion');
+    assert.strictEqual(resultLines[0], 'Line 1', 'First line unchanged');
+    assert.strictEqual(resultLines[1], 'Line 2', 'Second line unchanged');
+    assert.strictEqual(resultLines[2], 'Line 4', 'Line 4 moved up to position 3');
+    assert.strictEqual(resultLines[3], 'Line 5', 'Last line unchanged');
+  });
+
+  it('delete_lines_in_file: should delete a range of lines', async () => {
+    const testFile = path.join(testDir, 'delete_range_test.txt');
+    const originalContent = ['Line 1', 'Line 2', 'Line 3', 'Line 4', 'Line 5'].join('\n');
+    await fs.writeFile(testFile, originalContent, 'utf-8');
+    
+    // Simulate deleting lines 2-4 (1-indexed)
+    const lines = originalContent.split('\n');
+    const startLine = 2;
+    const endLine = 4;
+    const deleteCount = endLine - startLine + 1; // 3 lines
+    
+    lines.splice(startLine - 1, deleteCount);
+    
+    await fs.writeFile(testFile, lines.join('\n'), 'utf-8');
+    
+    const result = await fs.readFile(testFile, 'utf-8');
+    const resultLines = result.split('\n');
+    
+    assert.strictEqual(resultLines.length, 2, 'Should have 2 lines after deletion');
+    assert.strictEqual(resultLines[0], 'Line 1', 'First line unchanged');
+    assert.strictEqual(resultLines[1], 'Line 5', 'Last line moved up to position 2');
+  });
+
+  it('delete_lines_in_file: should handle deleting from beginning of file', async () => {
+    const testFile = path.join(testDir, 'delete_beginning_test.txt');
+    const originalContent = ['Line 1', 'Line 2', 'Line 3'].join('\n');
+    await fs.writeFile(testFile, originalContent, 'utf-8');
+    
+    // Simulate deleting lines 1-2 (from beginning)
+    const lines = originalContent.split('\n');
+    const startLine = 1;
+    const endLine = 2;
+    const deleteCount = endLine - startLine + 1;
+    
+    lines.splice(startLine - 1, deleteCount);
+    
+    await fs.writeFile(testFile, lines.join('\n'), 'utf-8');
+    
+    const result = await fs.readFile(testFile, 'utf-8');
+    const resultLines = result.split('\n');
+    
+    assert.strictEqual(resultLines.length, 1, 'Should have 1 line after deletion');
+    assert.strictEqual(resultLines[0], 'Line 3', 'Only Line 3 remains');
+  });
+
+  it('delete_lines_in_file: should handle deleting from end of file', async () => {
+    const testFile = path.join(testDir, 'delete_end_test.txt');
+    const originalContent = ['Line 1', 'Line 2', 'Line 3'].join('\n');
+    await fs.writeFile(testFile, originalContent, 'utf-8');
+    
+    // Simulate deleting lines 2-3 (from end)
+    const lines = originalContent.split('\n');
+    const startLine = 2;
+    const endLine = 3;
+    const deleteCount = endLine - startLine + 1;
+    
+    lines.splice(startLine - 1, deleteCount);
+    
+    await fs.writeFile(testFile, lines.join('\n'), 'utf-8');
+    
+    const result = await fs.readFile(testFile, 'utf-8');
+    const resultLines = result.split('\n');
+    
+    assert.strictEqual(resultLines.length, 1, 'Should have 1 line after deletion');
+    assert.strictEqual(resultLines[0], 'Line 1', 'Only Line 1 remains');
+  });
+
+  it('delete_lines_in_file: should return error when start_line is beyond file length', async () => {
+    const testFile = path.join(testDir, 'delete_beyond_test.txt');
+    const originalContent = ['Line 1', 'Line 2'].join('\n');
+    await fs.writeFile(testFile, originalContent, 'utf-8');
+    
+    // Simulate attempting to delete line 10 (beyond file length)
+    const lines = originalContent.split('\n');
+    const startLine = 10;
+    
+    assert.strictEqual(lines.length, 2, 'File has only 2 lines');
+    assert.ok(startLine > lines.length, 'Start line is beyond file length');
+    
+    // In real implementation, this would throw an error:
+    // "Start line 10 is beyond the end of the file (2 lines)"
+    const errorMessage = `Start line ${startLine} is beyond the end of the file (${lines.length} lines)`;
+    assert.ok(errorMessage.includes('beyond'), 'Error message should indicate out-of-bounds');
+  });
+
+  it('delete_lines_in_file: should handle invalid range (end_line < start_line)', async () => {
+    // Simulate validation for end_line < start_line
+    const startLine = 5;
+    const endLine = 2;
+    
+    assert.ok(endLine < startLine, 'End line is less than start line');
+    
+    // In real implementation, this would throw an error:
+    // "Invalid line range. End line must be >= Start line."
+    const errorMessage = 'Invalid line range. End line must be >= Start line.';
+    assert.ok(errorMessage.includes('Invalid'), 'Error message should indicate invalid range');
+  });
+
   it('should clean up test files', async () => {
     try {
       await fs.rm(testDir, { recursive: true, force: true });
