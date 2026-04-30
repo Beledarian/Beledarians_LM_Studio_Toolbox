@@ -3009,5 +3009,56 @@ Always assume relative paths are from this directory.`;
   });
   tools.push(searchInFileTool);
 
+
+  const deleteLinesInFileTool = tool({
+    name: "delete_lines_in_file",
+    description: text`
+      Delete a specific line or range of lines from a file.
+      Line numbers are 1-indexed (line 1 is the first line).
+      If end_line is omitted, only start_line will be deleted.
+    `,
+    parameters: {
+      file_name: z.string(),
+      start_line: z.number().int().min(1).describe("The starting line number to delete (1-indexed)"),
+      end_line: z.number().int().min(1).optional().describe("Optional: The ending line number to delete (inclusive). If omitted, only deletes start_line."),
+    },
+    implementation: async ({ file_name, start_line, end_line }) => {
+      try {
+        const filePath = validatePath(currentWorkingDirectory, file_name);
+        let content = "";
+        try {
+          content = await readFile(filePath, "utf-8");
+        } catch {
+          return { error: `File '${file_name}' does not exist.` };
+        }
+
+        const lines = content.split("\n");
+        const actualEndLine = end_line ?? start_line;
+
+        if (start_line > lines.length) {
+          return { error: `Start line ${start_line} is beyond the end of the file (${lines.length} lines)` };
+        }
+
+        const deleteCount = Math.min(actualEndLine - start_line + 1, lines.length - start_line + 1);
+        
+        if (deleteCount <= 0) {
+          return { error: `Invalid line range. End line must be >= Start line.` };
+        }
+
+        lines.splice(start_line - 1, deleteCount);
+
+        await writeFile(filePath, lines.join("\n"), "utf-8");
+        return { 
+          success: true, 
+          message: `Deleted ${deleteCount} line(s) (lines ${start_line}-${actualEndLine}) from ${file_name}`,
+          new_line_count: lines.length 
+        };
+      } catch (e) {
+        return { error: `Failed to delete lines: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    },
+  });
+  tools.push(deleteLinesInFileTool);
+
   return tools;
 }
