@@ -311,7 +311,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
       },
       implementation: async ({ title, message }) => {
         const notifier = await import("node-notifier");
-        notifier.notify({
+        // node-notifier is a CommonJS module, so dynamic import returns it on .default
+        notifier.default.notify({
           title: title,
           message: message,
           sound: true,
@@ -2128,6 +2129,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         let endpoint = pluginConfig.get("secondaryAgentEndpoint");
         let modelId = pluginConfig.get("secondaryModelId");
         const useMainModel = pluginConfig.get("useMainModelForSubAgent");
+        let handoffMessage: string | undefined = undefined;
+        let finalResponse = "";
 
         if (useMainModel) {
           endpoint = "http://localhost:1234/v1";
@@ -2270,9 +2273,21 @@ Always assume relative paths are from this directory.`;
                 console.log(`[Sub-Agent] Parse result source=${parsedMessage.toolCallSource} hasToolCall=${Boolean(toolCall)} preview=${preview}`);
               }
 
+              // Always capture the latest content as the finalContent candidate
+              finalContent = content;
+
               if (!toolsEnabled) {
                 const extracted = extractHandoffMessage(content);
-                return { response: extracted.response, filesModified, handoff_message: extracted.handoffMessage };
+                // If the only output is a bare tool-call JSON (model tried to use tools it wasn't
+                // given), substitute a clear failure message rather than leaking raw JSON.
+                const looksLikePureToolCall =
+                  extracted.response.trimStart().startsWith("{") &&
+                  parsedMessage.toolCall !== null &&
+                  extracted.response.trim().length < 500;
+                const safeResponse = looksLikePureToolCall
+                  ? "[Sub-agent did not produce a prose response. It attempted a tool call but tools are disabled for this invocation.]"
+                  : extracted.response;
+                return { response: safeResponse, filesModified, handoff_message: extracted.handoffMessage };
               }
 
               const trimmed = content.trim();
@@ -2593,7 +2608,6 @@ Always assume relative paths are from this directory.`;
                   !planningLikeText;
 
                 if (content.includes("TASK_COMPLETED") || shouldTreatAsFinalResponse || loops >= loopLimit - 1) {
-                  finalContent = content;
                   break; // Done
                 } else {
                   noToolCallCount++;
@@ -2769,8 +2783,9 @@ Always assume relative paths are from this directory.`;
         const primaryResult = await runAgentLoop(agent_role, task, context, 8, false, currentWorkingDirectory);
         if (primaryResult.error) return { error: primaryResult.error };
 
-        let finalResponse = primaryResult.response || "";
-        let handoffMessage: string | undefined = primaryResult.handoff_message;
+        finalResponse = primaryResult.response || "";
+        handoffMessage = primaryResult.handoff_message;
+        const generatedFiles = [...primaryResult.filesModified];
 
         // --- 2. Auto-Debug Loop ---
         if (debugMode && primaryResult.filesModified.length > 0) {
@@ -2818,12 +2833,15 @@ Always assume relative paths are from this directory.`;
           }
         }
 
-        // Always hide code blocks if the setting is disabled, regardless of file saving status
-        if (!showFullCode) {
+        // Only hide code blocks when files were actually saved.
+        // If nothing was written to disk, leave the raw response intact so the primary agent
+        // can see what the sub-agent actually did (or didn't do) rather than being misled
+        // by a false "code has been handled" success message.
+        if (!showFullCode && primaryResult.filesModified.length > 0) {
           finalResponse = finalResponse.replace(/```[\s\S]*?```/g, "\n[System: Code Block Hidden for Brevity. The code has been handled/saved by the sub-agent. Do NOT request it again. Proceed.]\n");
         }
 
-        return { response: finalResponse, generated_files: primaryResult.filesModified, handoff_message: handoffMessage };
+        return { response: finalResponse, generated_files: generatedFiles, handoff_message: handoffMessage };
       },
       enableSecondary,
       "consult_secondary_agent"
