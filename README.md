@@ -17,6 +17,14 @@ This project is a plugin for [LM Studio](https://lmstudio.ai/) that provides a r
 - **Batch Processing:** `save_file` supports creating multiple files in one go.
 - **Cleanup:** Use `delete_files_by_pattern` to wipe temporary files instantly.
 
+
+### Recent Updates (v1.3.0)
+
+- **🐙 Native GitHub CLI Tools:** Added `gh_auth`, `gh_create_issue`, `gh_list_issues`, `gh_view_comments`, `gh_create_pr`, `gh_list_prs`, `gh_view_pr_diff`, and `gh_push` for secure, structured GitHub interactions without generic shell commands
+- **🌿 Enhanced Git Workflow:** Added `git_add` and `git_checkout` tools to complete the native git toolchain (status, diff, log, commit, add, checkout)
+- **⚙️ New Sidebar Toggle:** Added "Allow GitHub CLI Tools" setting to enable/disable `gh_*` tools independently
+- **🛡️ Dependency Guards:** All CLI tools now verify installation before execution and provide clear prompts if missing
+
 ### Recent Updates (v1.2.0)
 
 - **🛡️ Sub-Agent Tool Validation:** Added early parameter validation with clear error messages to prevent silent failures when sub-agents use wrong parameter names or absolute paths outside workspace

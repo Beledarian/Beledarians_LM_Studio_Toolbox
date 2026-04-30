@@ -1,6 +1,10 @@
 import { createConfigSchematics } from "@lmstudio/sdk";
 
 export const pluginConfigSchematics = createConfigSchematics()
+  .field("planMode", "string", {
+    displayName: "Plan Mode",
+    subtitle: "Controls when the model should explore and propose a plan before making changes. Options: 'always', 'when_useful', 'never'.",
+  }, "when_useful")
   .field("retrievalLimit", "numeric", {
     int: true,
     min: 1,
@@ -38,6 +42,10 @@ export const pluginConfigSchematics = createConfigSchematics()
   .field("allowGitOperations", "boolean", {
     displayName: "Allow Git Operations",
     subtitle: "Enable git tools (status, commit, diff, log).",
+  }, true)
+  .field("allowGitHubTools", "boolean", {
+    displayName: "Allow GitHub CLI Tools",
+    subtitle: "Enable native GitHub CLI tools (gh_auth, gh_create_issue/pr, gh_list_issues/prs, gh_view_comments/diff, gh_push). Requires 'gh' installed.",
   }, true)
   .field("allowDatabaseInspection", "boolean", {
     displayName: "Allow Database Inspection",
