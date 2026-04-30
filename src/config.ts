@@ -43,6 +43,10 @@ export const pluginConfigSchematics = createConfigSchematics()
     displayName: "Allow Git Operations",
     subtitle: "Enable git tools (status, commit, diff, log).",
   }, true)
+  .field("allowGitHubTools", "boolean", {
+    displayName: "Allow GitHub CLI Tools",
+    subtitle: "Enable native GitHub CLI tools (gh_auth, gh_create_issue/pr, gh_list_issues/prs, gh_view_comments/diff, gh_push). Requires 'gh' installed.",
+  }, true)
   .field("allowDatabaseInspection", "boolean", {
     displayName: "Allow Database Inspection",
     subtitle: "Enable 'query_database' for SQLite files.",

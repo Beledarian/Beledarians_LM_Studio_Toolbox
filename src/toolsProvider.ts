@@ -162,6 +162,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
   const allowGit = pluginConfig.get("allowGitOperations");
   const allowDb = pluginConfig.get("allowDatabaseInspection");
   const allowNotify = pluginConfig.get("allowSystemNotifications");
+  const allowGitHubTools = pluginConfig.get("allowGitHubTools");
 
   // --- Git Tools ---
   if (allowGit) {
@@ -245,6 +246,55 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
       }
     });
     tools.push(gitLogTool);
+
+    const gitAddTool = tool({
+      name: "git_add",
+      description: "Stage specific files or all changes for the next commit.",
+      parameters: {
+        paths: z.array(z.string()).optional().describe("Optional: Specific file paths to stage. If omitted, stages all changes."),
+      },
+      implementation: async ({ paths }) => {
+        const { simpleGit } = await import("simple-git");
+        const git = simpleGit(currentWorkingDirectory);
+        try {
+          if (paths && paths.length > 0) {
+            const validatedPaths = paths.map(p => validatePath(currentWorkingDirectory, p));
+            await git.add(validatedPaths);
+          } else {
+            await git.add(".");
+          }
+          return { success: true, message: "Files staged successfully." };
+        } catch (e) {
+          return { error: `Git add failed: ${e instanceof Error ? e.message : String(e)}` };
+        }
+      },
+    });
+    tools.push(gitAddTool);
+
+    const gitCheckoutTool = tool({
+      name: "git_checkout",
+      description: "Switch to an existing branch or create and switch to a new one.",
+      parameters: {
+        branch_name: z.string().describe("Name of the branch to checkout."),
+        create_new: z.boolean().optional().default(false).describe("If true, creates the branch if it doesn't exist (like git checkout -b)."),
+      },
+      implementation: async ({ branch_name, create_new = false }) => {
+        const { simpleGit } = await import("simple-git");
+        const git = simpleGit(currentWorkingDirectory);
+        try {
+          if (create_new) {
+            await git.checkout(["-b", branch_name]);
+          } else {
+            await git.checkout(branch_name);
+          }
+          return { success: true, message: `Switched to branch '${branch_name}'.` };
+        } catch (e) {
+          return { error: `Git checkout failed: ${e instanceof Error ? e.message : String(e)}` };
+        }
+      },
+    });
+    tools.push(gitCheckoutTool);
+
   }
 
   // --- Document Tools ---
@@ -3135,6 +3185,300 @@ Always assume relative paths are from this directory.`;
     },
   });
   tools.push(deleteLinesInFileTool);
+
+  if (allowGitHubTools) {
+  // --- GitHub CLI (gh) Tools ---
+  
+  const checkGhInstalled = async (): Promise<boolean | string> => {
+    try {
+      const cmd = process.platform === 'win32' ? 'where gh' : 'which gh';
+      const child = spawn(cmd, [], { shell: true });
+      await new Promise((resolve) => child.on('close', resolve));
+      return true;
+    } catch (e) {
+      return "GitHub CLI ('gh') is not installed. Please ask the user to install it from https://cli.github.com/";
+    }
+  };
+
+  const ghAuthTool = tool({
+    name: "gh_auth",
+    description: "Check GitHub authentication status. If not authenticated, opens a terminal window for the user to sign in.",
+    parameters: {},
+    implementation: async () => {
+      const isInstalled = await checkGhInstalled();
+      if (typeof isInstalled === 'string') return { error: isInstalled };
+
+      try {
+        // Check status first
+        const statusChild = spawn("gh auth status", [], { shell: true });
+        let stderr = "";
+        statusChild.stderr.on("data", d => stderr += d);
+        await new Promise((resolve) => statusChild.on('close', resolve));
+
+        if (statusChild.exitCode === 0) {
+          return { success: true, message: "Already authenticated with GitHub." };
+        } else {
+          // Open terminal for login
+          const escapedDir = currentWorkingDirectory.replace(/"/g, '""');
+          const shellCommand = `start "" /D "${escapedDir}" cmd.exe /k "gh auth login --git-protocol=https & exit"`;
+          spawn("cmd.exe", ["/c", shellCommand], { detached: true, stdio: "ignore" });
+          return { success: true, message: "Opened a terminal window for GitHub authentication. Please sign in there." };
+        }
+      } catch (e) {
+        return { error: `Auth check failed: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    },
+  });
+  tools.push(ghAuthTool);
+
+  const ghCreateIssueTool = tool({
+    name: "gh_create_issue",
+    description: "Create a new GitHub issue in the current repository.",
+    parameters: {
+      title: z.string(),
+      body: z.string().optional(),
+      labels: z.array(z.string()).optional(),
+    },
+    implementation: async ({ title, body, labels }) => {
+      const isInstalled = await checkGhInstalled();
+      if (typeof isInstalled === 'string') return { error: isInstalled };
+
+      try {
+        let bodyFileArg = "";
+        let tempFilePath = "";
+        
+        if (body) {
+          tempFilePath = join(currentWorkingDirectory, `gh_issue_body_${Date.now()}.md`);
+          await writeFile(tempFilePath, body, "utf-8");
+          bodyFileArg = `--body-file "${tempFilePath}"`;
+        }
+
+        const labelsStr = labels ? labels.map(l => `-l "${l}"`).join(" ") : "";
+        const cmd = `gh issue create --title "${title.replace(/"/g, '\\"')}" ${bodyFileArg} ${labelsStr}`;
+        
+        const child = spawn(cmd, [], { shell: true });
+        let stdout = "", stderr = "";
+        child.stdout.on("data", d => stdout += d);
+        child.stderr.on("data", d => stderr += d);
+        await new Promise((resolve) => child.on('close', resolve));
+
+        if (tempFilePath) await rm(tempFilePath, { force: true });
+
+        if (child.exitCode === 0) return { success: true, url: stdout.trim() };
+        return { error: `Failed to create issue: ${stderr}` };
+      } catch (e) {
+        return { error: `Create issue failed: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    },
+  });
+  tools.push(ghCreateIssueTool);
+
+  const ghListIssuesTool = tool({
+    name: "gh_list_issues",
+    description: "List issues in the current repository.",
+    parameters: {
+      state: z.enum(["open", "closed"]).optional().default("open"),
+      labels: z.array(z.string()).optional(),
+      limit: z.number().min(1).max(50).optional().default(10),
+    },
+    implementation: async ({ state, labels, limit }) => {
+      const isInstalled = await checkGhInstalled();
+      if (typeof isInstalled === 'string') return { error: isInstalled };
+
+      try {
+        const labelsStr = labels ? labels.map(l => `-l "${l}"`).join(" ") : "";
+        const cmd = `gh issue list --state ${state} ${labelsStr} --limit ${limit} --json number,title,state,url,labels`;
+        
+        const child = spawn(cmd, [], { shell: true });
+        let stdout = "", stderr = "";
+        child.stdout.on("data", d => stdout += d);
+        child.stderr.on("data", d => stderr += d);
+        await new Promise((resolve) => child.on('close', resolve));
+
+        if (child.exitCode === 0) {
+          try { return { issues: JSON.parse(stdout) }; } 
+          catch { return { error: "Failed to parse issue list output" }; }
+        }
+        return { error: `List issues failed: ${stderr}` };
+      } catch (e) {
+        return { error: `List issues failed: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    },
+  });
+  tools.push(ghListIssuesTool);
+
+  const ghViewCommentsTool = tool({
+    name: "gh_view_comments",
+    description: "View comments on a specific issue or pull request.",
+    parameters: {
+      number: z.number().describe("The issue or PR number"),
+      type: z.enum(["issue", "pr"]).default("issue").describe("Whether it's an issue or a pull request"),
+    },
+    implementation: async ({ number, type }) => {
+      const isInstalled = await checkGhInstalled();
+      if (typeof isInstalled === 'string') return { error: isInstalled };
+
+      try {
+        // Fallback to standard gh command for reliable JSON parsing of comments
+        const cmd = type === "issue" 
+          ? `gh issue view ${number} --json comments` 
+          : `gh pr view ${number} --json comments`;
+
+        const child = spawn(cmd, [], { shell: true });
+        let stdout = "", stderr = "";
+        child.stdout.on("data", d => stdout += d);
+        child.stderr.on("data", d => stderr += d);
+        await new Promise((resolve) => child.on('close', resolve));
+
+        if (child.exitCode === 0) {
+          try { 
+            const data = JSON.parse(stdout);
+            return { comments: data.comments || [] }; 
+          } catch { return { raw_output: stdout }; }
+        }
+        return { error: `View comments failed: ${stderr}` };
+      } catch (e) {
+        return { error: `View comments failed: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    },
+  });
+  tools.push(ghViewCommentsTool);
+
+  const ghCreatePrTool = tool({
+    name: "gh_create_pr",
+    description: "Create a new pull request in the current repository.",
+    parameters: {
+      title: z.string(),
+      body: z.string().optional(),
+      head_branch: z.string().describe("The branch containing your changes"),
+      base_branch: z.string().default("main").describe("The branch you want to merge into (e.g., main, master)"),
+    },
+    implementation: async ({ title, body, head_branch, base_branch }) => {
+      const isInstalled = await checkGhInstalled();
+      if (typeof isInstalled === 'string') return { error: isInstalled };
+
+      try {
+        let bodyFileArg = "";
+        let tempFilePath = "";
+        
+        if (body) {
+          tempFilePath = join(currentWorkingDirectory, `gh_pr_body_${Date.now()}.md`);
+          await writeFile(tempFilePath, body, "utf-8");
+          bodyFileArg = `--body-file "${tempFilePath}"`;
+        }
+
+        const cmd = `gh pr create --title "${title.replace(/"/g, '\\"')}" --head ${head_branch} --base ${base_branch} ${bodyFileArg}`;
+        
+        const child = spawn(cmd, [], { shell: true });
+        let stdout = "", stderr = "";
+        child.stdout.on("data", d => stdout += d);
+        child.stderr.on("data", d => stderr += d);
+        await new Promise((resolve) => child.on('close', resolve));
+
+        if (tempFilePath) await rm(tempFilePath, { force: true });
+
+        if (child.exitCode === 0) return { success: true, url: stdout.trim() };
+        return { error: `Failed to create PR: ${stderr}` };
+      } catch (e) {
+        return { error: `Create PR failed: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    },
+  });
+  tools.push(ghCreatePrTool);
+
+  const ghListPrsTool = tool({
+    name: "gh_list_prs",
+    description: "List pull requests in the current repository.",
+    parameters: {
+      state: z.enum(["open", "closed"]).optional().default("open"),
+      limit: z.number().min(1).max(50).optional().default(10),
+    },
+    implementation: async ({ state, limit }) => {
+      const isInstalled = await checkGhInstalled();
+      if (typeof isInstalled === 'string') return { error: isInstalled };
+
+      try {
+        const cmd = `gh pr list --state ${state} --limit ${limit} --json number,title,state,url,headRefName,baseRefName`;
+        
+        const child = spawn(cmd, [], { shell: true });
+        let stdout = "", stderr = "";
+        child.stdout.on("data", d => stdout += d);
+        child.stderr.on("data", d => stderr += d);
+        await new Promise((resolve) => child.on('close', resolve));
+
+        if (child.exitCode === 0) {
+          try { return { pull_requests: JSON.parse(stdout) }; } 
+          catch { return { error: "Failed to parse PR list output" }; }
+        }
+        return { error: `List PRs failed: ${stderr}` };
+      } catch (e) {
+        return { error: `List PRs failed: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    },
+  });
+  tools.push(ghListPrsTool);
+
+  const ghViewPrDiffTool = tool({
+    name: "gh_view_pr_diff",
+    description: "Fetch the diff/patch of a specific pull request.",
+    parameters: {
+      number: z.number().describe("The PR number"),
+    },
+    implementation: async ({ number }) => {
+      const isInstalled = await checkGhInstalled();
+      if (typeof isInstalled === 'string') return { error: isInstalled };
+
+      try {
+        const cmd = `gh pr diff ${number}`;
+        
+        const child = spawn(cmd, [], { shell: true });
+        let stdout = "", stderr = "";
+        child.stdout.on("data", d => stdout += d);
+        child.stderr.on("data", d => stderr += d);
+        await new Promise((resolve) => child.on('close', resolve));
+
+        if (child.exitCode === 0) {
+          return { diff: stdout.substring(0, 50000) + (stdout.length > 50000 ? "\n... (truncated)" : "") };
+        }
+        return { error: `Fetch PR diff failed: ${stderr}` };
+      } catch (e) {
+        return { error: `Fetch PR diff failed: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    },
+  });
+  tools.push(ghViewPrDiffTool);
+
+  const ghPushTool = tool({
+    name: "gh_push",
+    description: "Push local commits to the remote GitHub repository.",
+    parameters: {
+      branch: z.string().optional().describe("Optional: The branch to push. Defaults to current branch."),
+    },
+    implementation: async ({ branch }) => {
+      const isInstalled = await checkGhInstalled();
+      if (typeof isInstalled === 'string') return { error: isInstalled };
+
+      try {
+        const cmd = branch ? `git push origin ${branch}` : "git push";
+        
+        const child = spawn(cmd, [], { shell: true });
+        let stdout = "", stderr = "";
+        child.stdout.on("data", d => stdout += d);
+        child.stderr.on("data", d => stderr += d);
+        await new Promise((resolve) => child.on('close', resolve));
+
+        if (child.exitCode === 0) return { success: true, message: "Pushed successfully." };
+        return { error: `Git push failed: ${stderr}` };
+      } catch (e) {
+        return { error: `Git push failed: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    },
+  });
+  tools.push(ghPushTool);
+
+} // End of if (allowGitHubTools)
+
+
 
   return tools;
 }
