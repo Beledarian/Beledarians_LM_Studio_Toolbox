@@ -3213,19 +3213,22 @@ Always assume relative paths are from this directory.`;
       if (typeof isInstalled === 'string') return { error: isInstalled };
 
       try {
-        let bodyFileArg = "";
         let tempFilePath = "";
+        const ghArgs = ["issue", "create", "--title", title];
         
         if (body) {
           tempFilePath = join(currentWorkingDirectory, `gh_issue_body_${Date.now()}.md`);
           await writeFile(tempFilePath, body, "utf-8");
-          bodyFileArg = `--body-file "${tempFilePath}"`;
+          ghArgs.push("--body-file", tempFilePath);
         }
 
-        const labelsStr = labels ? labels.map(l => `-l "${l}"`).join(" ") : "";
-        const cmd = `gh issue create --title "${title.replace(/"/g, '\\"')}" ${bodyFileArg} ${labelsStr}`;
+        if (labels) {
+          for (const label of labels) {
+            ghArgs.push("-l", label);
+          }
+        }
         
-        const child = spawn(cmd, [], { shell: true });
+        const child = spawn("gh", ghArgs);
         let stdout = "", stderr = "";
         child.stdout.on("data", d => stdout += d);
         child.stderr.on("data", d => stderr += d);
@@ -3255,10 +3258,14 @@ Always assume relative paths are from this directory.`;
       if (typeof isInstalled === 'string') return { error: isInstalled };
 
       try {
-        const labelsStr = labels ? labels.map(l => `-l "${l}"`).join(" ") : "";
-        const cmd = `gh issue list --state ${state} ${labelsStr} --limit ${limit} --json number,title,state,url,labels`;
+        const ghArgs = ["issue", "list", "--state", state, "--limit", String(limit), "--json", "number,title,state,url,labels"];
+        if (labels) {
+          for (const label of labels) {
+            ghArgs.push("-l", label);
+          }
+        }
         
-        const child = spawn(cmd, [], { shell: true });
+        const child = spawn("gh", ghArgs);
         let stdout = "", stderr = "";
         child.stdout.on("data", d => stdout += d);
         child.stderr.on("data", d => stderr += d);
@@ -3289,11 +3296,11 @@ Always assume relative paths are from this directory.`;
 
       try {
         // Fallback to standard gh command for reliable JSON parsing of comments
-        const cmd = type === "issue" 
-          ? `gh issue view ${number} --json comments` 
-          : `gh pr view ${number} --json comments`;
+        const ghArgs = type === "issue" 
+          ? ["issue", "view", String(number), "--json", "comments"]
+          : ["pr", "view", String(number), "--json", "comments"];
 
-        const child = spawn(cmd, [], { shell: true });
+        const child = spawn("gh", ghArgs);
         let stdout = "", stderr = "";
         child.stdout.on("data", d => stdout += d);
         child.stderr.on("data", d => stderr += d);
@@ -3327,18 +3334,16 @@ Always assume relative paths are from this directory.`;
       if (typeof isInstalled === 'string') return { error: isInstalled };
 
       try {
-        let bodyFileArg = "";
         let tempFilePath = "";
+        const ghArgs = ["pr", "create", "--title", title, "--head", head_branch, "--base", base_branch];
         
         if (body) {
           tempFilePath = join(currentWorkingDirectory, `gh_pr_body_${Date.now()}.md`);
           await writeFile(tempFilePath, body, "utf-8");
-          bodyFileArg = `--body-file "${tempFilePath}"`;
+          ghArgs.push("--body-file", tempFilePath);
         }
 
-        const cmd = `gh pr create --title "${title.replace(/"/g, '\\"')}" --head ${head_branch} --base ${base_branch} ${bodyFileArg}`;
-        
-        const child = spawn(cmd, [], { shell: true });
+        const child = spawn("gh", ghArgs);
         let stdout = "", stderr = "";
         child.stdout.on("data", d => stdout += d);
         child.stderr.on("data", d => stderr += d);
@@ -3367,9 +3372,9 @@ Always assume relative paths are from this directory.`;
       if (typeof isInstalled === 'string') return { error: isInstalled };
 
       try {
-        const cmd = `gh pr list --state ${state} --limit ${limit} --json number,title,state,url,headRefName,baseRefName`;
+        const ghArgs = ["pr", "list", "--state", state, "--limit", String(limit), "--json", "number,title,state,url,headRefName,baseRefName"];
         
-        const child = spawn(cmd, [], { shell: true });
+        const child = spawn("gh", ghArgs);
         let stdout = "", stderr = "";
         child.stdout.on("data", d => stdout += d);
         child.stderr.on("data", d => stderr += d);
@@ -3398,9 +3403,9 @@ Always assume relative paths are from this directory.`;
       if (typeof isInstalled === 'string') return { error: isInstalled };
 
       try {
-        const cmd = `gh pr diff ${number}`;
+        const ghArgs = ["pr", "diff", String(number)];
         
-        const child = spawn(cmd, [], { shell: true });
+        const child = spawn("gh", ghArgs);
         let stdout = "", stderr = "";
         child.stdout.on("data", d => stdout += d);
         child.stderr.on("data", d => stderr += d);
@@ -3428,9 +3433,10 @@ Always assume relative paths are from this directory.`;
       if (typeof isInstalled === 'string') return { error: isInstalled };
 
       try {
-        const cmd = branch ? `git push origin ${branch}` : "git push";
+        const gitArgs = ["push", "origin"];
+        if (branch) gitArgs.push(branch);
         
-        const child = spawn(cmd, [], { shell: true });
+        const child = spawn("git", gitArgs);
         let stdout = "", stderr = "";
         child.stdout.on("data", d => stdout += d);
         child.stderr.on("data", d => stderr += d);
