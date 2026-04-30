@@ -18,13 +18,13 @@ import type { Browser, Page } from "puppeteer";
 // --- Security Helper ---
 function validatePath(baseDir: string, requestedPath: string): string {
   const resolved = resolve(baseDir, requestedPath);
-  // Normalize checking to prevent casing bypass on Windows
-  const lowerResolved = resolved.toLowerCase();
-  const lowerBase = resolve(baseDir).toLowerCase();
-
-  if (!lowerResolved.startsWith(lowerBase)) {
+  
+  // Use relative pathing to ensure the resolved path stays within baseDir
+  const rel = relative(baseDir, resolved);
+  if (rel.startsWith("..") || isAbsolute(rel)) {
     throw new Error(`Access Denied: Path '${requestedPath}' is outside the workspace.`);
   }
+  
   return resolved;
 }
 
@@ -1127,12 +1127,16 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         return parsedResults;
       };
 
-      const launchBrowser = async () => {
-        const puppeteer = await import("puppeteer");
-        return puppeteer.launch({
-          headless: true,
-          args: ["--no-sandbox", "--disable-setuid-sandbox"],
-        });
+      let sharedBrowser: Browser | null = null;
+      const getBrowser = async () => {
+        if (!sharedBrowser) {
+          const puppeteer = await import("puppeteer");
+          sharedBrowser = await puppeteer.launch({
+            headless: true,
+            args: ["--no-sandbox", "--disable-setuid-sandbox"],
+          });
+        }
+        return sharedBrowser;
       };
 
       const searchFunctions: Record<SearchProvider, (q: string) => Promise<SearchResult[]>> = {
@@ -1184,7 +1188,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         },
 
         "duckduckgo-html": async (q: string) => {
-          const browser = await launchBrowser();
+          const browser = await getBrowser();
           try {
             const page = await browser.newPage();
             await page.goto(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`, { waitUntil: "networkidle2", timeout: 15000 });
@@ -1199,7 +1203,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         },
 
         "google": async (q: string) => {
-          const browser = await launchBrowser();
+          const browser = await getBrowser();
           try {
             const page = await browser.newPage();
             await page.goto(`https://www.google.com/search?q=${encodeURIComponent(q)}`, { waitUntil: "networkidle2", timeout: 15000 });
@@ -1230,7 +1234,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         },
 
         "bing": async (q: string) => {
-          const browser = await launchBrowser();
+          const browser = await getBrowser();
           try {
             const page = await browser.newPage();
             await page.goto(`https://www.bing.com/search?q=${encodeURIComponent(q)}`, { waitUntil: "networkidle2", timeout: 15000 });
@@ -1495,6 +1499,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         try {
           const entries = await readdir(dir, { withFileTypes: true });
           for (const entry of entries) {
+            if (['node_modules', '.git', 'dist', '.lmstudio'].includes(entry.name)) continue;
             const fullPath = join(dir, entry.name);
             if (entry.isDirectory()) {
               await scan(fullPath, currentDepth + 1);
