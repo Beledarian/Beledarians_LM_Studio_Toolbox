@@ -130,8 +130,11 @@ function isMatchingBracket(open: string, close: string): boolean {
 
 function extractBalancedJsonSnippets(text: string, maxSnippets = 12): string[] {
   const snippets: string[] = [];
+  let iterations = 0;
+  const MAX_ITERATIONS = 500000;
 
   for (let start = 0; start < text.length; start++) {
+    if (iterations > MAX_ITERATIONS) break;
     const opener = text[start];
     if (opener !== "{" && opener !== "[") continue;
 
@@ -140,7 +143,12 @@ function extractBalancedJsonSnippets(text: string, maxSnippets = 12): string[] {
     let escaped = false;
     let invalid = false;
 
-    for (let end = start + 1; end < text.length; end++) {
+    // Limit the lookahead to prevent O(N^2) event loop blocking
+    const endLimit = Math.min(text.length, start + 30000);
+
+    for (let end = start + 1; end < endLimit; end++) {
+      iterations++;
+      if (iterations > MAX_ITERATIONS) break;
       const char = text[end];
 
       if (inString) {

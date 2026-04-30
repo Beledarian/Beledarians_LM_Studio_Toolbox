@@ -47,6 +47,10 @@ export const pluginConfigSchematics = createConfigSchematics()
     displayName: "Allow System Notifications",
     subtitle: "Enable the agent to send OS notifications.",
   }, true)
+  .field("allowGitHubTools", "boolean", {
+    displayName: "Allow GitHub Tools",
+    subtitle: "Allow the agent to interact with GitHub CLI (gh)",
+  }, true)
   .field("allowAllCode", "boolean", {
     displayName: "Allow All Code Execution",
     subtitle: "MASTER SWITCH: Overrides all other settings to enable ALL execution tools.",
