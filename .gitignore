@@ -1,5 +1,4 @@
 .lmstudio
-.beledarian
 node_modules
 dist/
 fix-bugs.js
