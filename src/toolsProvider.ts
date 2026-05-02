@@ -2314,7 +2314,16 @@ Always assume relative paths are from this directory.`;
           const toolsEnabled = allow_tools || forceTools;
           if (toolsEnabled) {
             const allowedTools = [];
-            if (allowFileSystem) allowedTools.push("read_file", "list_directory", "save_file", "replace_text_in_file", "delete_files_by_pattern", "rag_local_files", "fuzzy_find_local_files", "search_file_content");
+            if (allowFileSystem) {
+              // Core file operations
+              allowedTools.push("read_file", "list_directory", "save_file", "replace_text_in_file");
+              // Enhanced file editing
+              allowedTools.push("read_file_range", "insert_at_line", "append_file", "delete_lines_in_file");
+              // File search and discovery
+              allowedTools.push("find_files", "fuzzy_find_local_files", "search_file_content", "search_in_file");
+              // File management
+              allowedTools.push("delete_files_by_pattern", "rag_local_files");
+            }
             if (allowWeb) allowedTools.push("wikipedia_search", "web_search", "duckduckgo_search", "fetch_web_content", "rag_web_content");
             if (allowWeb && allowSubAgentBrowserControl && allowBrowserControl) allowedTools.push("browser_session_open", "browser_session_control", "browser_session_close");
             if (allowCode) allowedTools.push("run_python", "run_javascript");
@@ -2625,9 +2634,51 @@ Always assume relative paths are from this directory.`;
                 try {
                   // --- Early Parameter Validation (catches wrong param names + absolute paths) ---
                   const args = toolCall.args || {};
+                   
+                   // --- Parameter Name Normalization BEFORE Validation (handle common model mistakes) ---
+                   const normalizedArgs = { ...args };
+                   
+                   // fuzzy_find_local_files: pattern -> query
+                   if (toolCall.tool === "fuzzy_find_local_files" && !normalizedArgs.query && normalizedArgs.pattern) {
+                     normalizedArgs.query = normalizedArgs.pattern;
+                   }
+                   
+                   // run_python/run_javascript: code -> python/javascript  
+                   if ((toolCall.tool === "run_python" || toolCall.tool === "run_javascript") && 
+                       !normalizedArgs.python && !normalizedArgs.javascript && 
+                       normalizedArgs.code) {
+                     if (toolCall.tool === "run_python") {
+                       normalizedArgs.python = normalizedArgs.code;
+                     } else {
+                       normalizedArgs.javascript = normalizedArgs.code;
+                     }
+                   }
+                   
+                   // search_file_content/search_in_file: query -> pattern, path -> file_name
+                   if ((toolCall.tool === "search_file_content" || toolCall.tool === "search_in_file")) {
+                     if (!normalizedArgs.pattern && normalizedArgs.query) {
+                       normalizedArgs.pattern = normalizedArgs.query;
+                     }
+                     if (!normalizedArgs.file_name && normalizedArgs.path) {
+                       normalizedArgs.file_name = normalizedArgs.path;
+                     }
+                   }
+                   
+                   // read_file/save_file: path -> file_name, data -> content
+                   if (toolCall.tool === "read_file" || toolCall.tool === "save_file") {
+                     if (!normalizedArgs.file_name && normalizedArgs.path) {
+                       normalizedArgs.file_name = normalizedArgs.path;
+                     }
+                     if (toolCall.tool === "save_file" && !normalizedArgs.content && normalizedArgs.data) {
+                       normalizedArgs.content = normalizedArgs.data;
+                     }
+                   }
+                   
+                   // Update toolCall.args with normalized values so validation and execution use them
+                   toolCall.args = normalizedArgs;
                   
                   // Use shared validator to prevent duplication between prod and tests
-                  toolValidationError = validateToolCall(toolCall.tool, args);
+                  toolValidationError = validateToolCall(toolCall.tool, normalizedArgs);
                   
                   // If validation failed, return error immediately so subagent can retry
                   if (toolValidationError) {
@@ -2643,7 +2694,10 @@ Always assume relative paths are from this directory.`;
                         ? `${readContent.substring(0, maxSubAgentToolOutputChars)}\n... (truncated ${readContent.length - maxSubAgentToolOutputChars} chars)`
                         : readContent;
                     } else if (toolCall.tool === "list_directory") {
-                      const files = await readdir(currentWorkingDirectory);
+                      const targetPath = toolCall.args?.path 
+                        ? validatePath(currentWorkingDirectory, toolCall.args.path) 
+                        : currentWorkingDirectory;
+                      const files = await readdir(targetPath);
                       toolResult = JSON.stringify(files);
                     } else if (toolCall.tool === "save_file") {
                       // Handle batch files (some models return { files: [...] })
@@ -2728,6 +2782,251 @@ Always assume relative paths are from this directory.`;
                         .map(entry => relative(targetDir, join(entry.path, entry.name)).replace(/\\/g, "/"));
                       const ranked = rankFuzzyMatches(toolCall.args.query, files, maxResults);
                       toolResult = JSON.stringify(ranked.map(item => ({ path: item.value, score: item.score })));
+                    } else if (toolCall.tool === "search_file_content" || toolCall.tool === "search_in_file") {
+                      // Search for pattern in file content (grep-like functionality)
+                      const fileName = toolCall.args?.file_name || toolCall.args?.path;
+                      const pattern = toolCall.args?.pattern || toolCall.args?.query;
+                      if (!fileName || !pattern) {
+                        toolResult = "Error: 'search_file_content' requires parameters: [file_name, pattern].";
+                      } else {
+                        try {
+                          const fpath = validatePath(currentWorkingDirectory, fileName);
+                          const content = await readFile(fpath, "utf-8");
+                          const lines = content.split("\n");
+                          const matches: Array<{ line_number: number; content: string }> = [];
+                          
+                          for (let i = 0; i < lines.length && matches.length < 100; i++) {
+                            let lineToSearch = lines[i];
+                            let patternToMatch = pattern;
+                            
+                            // Case-insensitive by default unless specified
+                            const caseSensitive = toolCall.args?.case_sensitive !== undefined 
+                              ? toolCall.args.case_sensitive 
+                              : false;
+                              
+                            if (!caseSensitive) {
+                              lineToSearch = lineToSearch.toLowerCase();
+                              patternToMatch = patternToMatch.toLowerCase();
+                            }
+                            
+                            // Support regex or literal search
+                            const useRegex = toolCall.args?.use_regex || false;
+                            let isMatch = false;
+                            
+                            if (useRegex) {
+                              try {
+                                const regex = new RegExp(patternToMatch);
+                                isMatch = regex.test(lineToSearch);
+                              } catch (e: any) {
+                                return { error: `Invalid regex pattern: ${e.message}` };
+                              }
+                            } else {
+                              isMatch = lineToSearch.includes(patternToMatch);
+                            }
+                            
+                            if (isMatch) {
+                              matches.push({
+                                line_number: i + 1,
+                                content: lines[i],
+                              });
+                            }
+                          }
+                          
+                          toolResult = JSON.stringify({
+                            file_name: fileName,
+                            pattern: pattern,
+                            match_count: matches.length,
+                            matches: matches.slice(0, 50), // Limit to first 50 matches
+                          });
+                        } catch (e: any) {
+                          toolResult = `Error searching file: ${e.message}`;
+                        }
+                      }
+                    } else if (toolCall.tool === "read_file_range") {
+                      // Read specific lines from a file with line numbers
+                      const fileName = toolCall.args?.file_name;
+                      const startLine = toolCall.args?.start_line;
+                      const endLine = toolCall.args?.end_line;
+                      
+                      if (!fileName || !startLine || !endLine) {
+                        toolResult = "Error: 'read_file_range' requires parameters: [file_name, start_line, end_line].";
+                      } else {
+                        try {
+                          const fpath = validatePath(currentWorkingDirectory, fileName);
+                          const content = await readFile(fpath, "utf-8");
+                          const lines = content.split("\n");
+                          
+                          if (startLine > lines.length) {
+                            toolResult = `Error: Start line ${startLine} is beyond the end of the file (${lines.length} lines).`;
+                          } else {
+                            const actualEndLine = Math.min(endLine, lines.length);
+                            const selectedLines = lines.slice(startLine - 1, actualEndLine);
+                            
+                            const numberedContent = selectedLines.map((line, idx) => 
+                              `${startLine + idx}: ${line}`
+                            ).join("\n");
+                            
+                            toolResult = JSON.stringify({
+                              file_name: fileName,
+                              start_line: startLine,
+                              end_line: actualEndLine,
+                              line_count: selectedLines.length,
+                              content_with_line_numbers: numberedContent,
+                            });
+                          }
+                        } catch (e: any) {
+                          toolResult = `Error reading file range: ${e.message}`;
+                        }
+                      }
+                    } else if (toolCall.tool === "find_files") {
+                      // Find files recursively matching a pattern
+                      const pattern = toolCall.args?.pattern;
+                      const maxDepth = toolCall.args?.max_depth ?? 5;
+                      
+                      if (!pattern) {
+                        toolResult = "Error: 'find_files' requires parameter: [pattern].";
+                      } else {
+                        try {
+                          const foundFiles: string[] = [];
+                          const lowerPattern = pattern.toLowerCase();
+                          
+                          async function scan(dir: string, currentDepth: number) {
+                            if (currentDepth > maxDepth) return;
+                            try {
+                              const entries = await readdir(dir, { withFileTypes: true });
+                              for (const entry of entries) {
+                                // Skip common directories that shouldn't be searched
+                                if (['node_modules', '.git', 'dist', '.lmstudio'].includes(entry.name)) continue;
+                                
+                                const fullPath = join(dir, entry.name);
+                                if (entry.isDirectory()) {
+                                  await scan(fullPath, currentDepth + 1);
+                                } else if (entry.isFile()) {
+                                  if (entry.name.toLowerCase().includes(lowerPattern)) {
+                                    foundFiles.push(relative(currentWorkingDirectory, fullPath).replace(/\\/g, "/"));
+                                  }
+                                }
+                              }
+                            } catch (e) {
+                              // Ignore access errors
+                            }
+                          }
+                          
+                          await scan(currentWorkingDirectory, 0);
+                          toolResult = JSON.stringify({
+                            found_files: foundFiles.slice(0, 100), // Limit results
+                            count: foundFiles.length,
+                          });
+                        } catch (e: any) {
+                          toolResult = `Error searching for files: ${e.message}`;
+                        }
+                      }
+                    } else if (toolCall.tool === "insert_at_line") {
+                      // Insert content at a specific line number
+                      const fileName = toolCall.args?.file_name;
+                      const lineNumber = toolCall.args?.line_number;
+                      const contentToInsert = toolCall.args?.content_to_insert;
+                      
+                      if (!fileName || !lineNumber || contentToInsert === undefined) {
+                        toolResult = "Error: 'insert_at_line' requires parameters: [file_name, line_number, content_to_insert].";
+                      } else {
+                        try {
+                          const fpath = validatePath(currentWorkingDirectory, fileName);
+                          let content = "";
+                          
+                          // Try to read existing file, or create new if doesn't exist
+                          try {
+                            content = await readFile(fpath, "utf-8");
+                          } catch {
+                            if (lineNumber !== 1) {
+                              toolResult = `Error: File '${fileName}' does not exist. Can only insert at line 1 in a new file.`;
+                            }
+                          }
+                          
+                          if (!toolResult) {
+                            const lines = content.split("\n");
+                            const insertIndex = Math.min(lineNumber - 1, lines.length);
+                            lines.splice(insertIndex, 0, contentToInsert);
+                            
+                            await writeFile(fpath, lines.join("\n"), "utf-8");
+                            toolResult = JSON.stringify({
+                              success: true,
+                              message: `Inserted ${contentToInsert.split('\n').length} line(s) at line ${lineNumber}`,
+                              new_line_count: lines.length,
+                            });
+                            filesModified.push(fileName);
+                          }
+                        } catch (e: any) {
+                          toolResult = `Error inserting text: ${e.message}`;
+                        }
+                      }
+                    } else if (toolCall.tool === "append_file") {
+                      // Append content to end of file
+                      const fileName = toolCall.args?.file_name;
+                      const contentToAppend = toolCall.args?.content;
+                      
+                      if (!fileName || !contentToAppend) {
+                        toolResult = "Error: 'append_file' requires parameters: [file_name, content].";
+                      } else {
+                        try {
+                          const fpath = validatePath(currentWorkingDirectory, fileName);
+                          await mkdir(dirname(fpath), { recursive: true });
+                          await appendFile(fpath, contentToAppend, "utf-8");
+                          toolResult = JSON.stringify({
+                            success: true,
+                            message: `Content appended to ${fileName}`,
+                          });
+                          filesModified.push(fileName);
+                        } catch (e: any) {
+                          toolResult = `Error appending to file: ${e.message}`;
+                        }
+                      }
+                    } else if (toolCall.tool === "delete_lines_in_file") {
+                      // Delete specific lines from a file
+                      const fileName = toolCall.args?.file_name;
+                      const startLine = toolCall.args?.start_line;
+                      const endLine = toolCall.args?.end_line ?? startLine;
+                      
+                      if (!fileName || !startLine) {
+                        toolResult = "Error: 'delete_lines_in_file' requires parameters: [file_name, start_line].";
+                      } else {
+                        try {
+                          const fpath = validatePath(currentWorkingDirectory, fileName);
+                          let content = "";
+                          
+                          try {
+                            content = await readFile(fpath, "utf-8");
+                          } catch {
+                            toolResult = `Error: File '${fileName}' does not exist.`;
+                          }
+                          
+                          if (!toolResult) {
+                            const lines = content.split("\n");
+                            
+                            if (startLine > lines.length) {
+                              toolResult = `Error: Start line ${startLine} is beyond the end of the file (${lines.length} lines).`;
+                            } else {
+                              const deleteCount = Math.min(endLine - startLine + 1, lines.length - startLine + 1);
+                              
+                              if (deleteCount <= 0) {
+                                toolResult = `Error: Invalid line range. End line must be >= Start line.`;
+                              } else {
+                                lines.splice(startLine - 1, deleteCount);
+                                
+                                await writeFile(fpath, lines.join("\n"), "utf-8");
+                                toolResult = JSON.stringify({
+                                  success: true,
+                                  message: `Deleted ${deleteCount} line(s) (lines ${startLine}-${endLine})`,
+                                  new_line_count: lines.length,
+                                });
+                                filesModified.push(fileName);
+                              }
+                            }
+                          }
+                        } catch (e: any) {
+                          toolResult = `Error deleting lines: ${e.message}`;
+                        }
+                      }
                     }
                   }
                   // --- Web ---
@@ -2859,6 +3158,12 @@ Always assume relative paths are from this directory.`;
                   if (allowCode && !toolResult) {
                     if (toolCall.tool === "run_python") {
                       const res = await originalRunPythonImplementation({ python: toolCall.args.python });
+                      toolResult = res.stderr ? `Error: ${res.stderr}` : res.stdout;
+                    } else if (toolCall.tool === "run_javascript") {
+                      const res = await originalRunJavascriptImplementation({ 
+                        javascript: toolCall.args.javascript,
+                        timeout_seconds: toolCall.args.timeout_seconds 
+                      });
                       toolResult = res.stderr ? `Error: ${res.stderr}` : res.stdout;
                     }
                   }
