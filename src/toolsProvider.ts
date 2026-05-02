@@ -2350,6 +2350,14 @@ Always assume relative paths are from this directory.`;
             : null;
           const startTime = Date.now();
           const timeoutMs = subAgentTimeLimit * 1000;
+          // --- Diagnostic Logging Start ---
+          if (subAgentDebugLogging) {
+            console.log(`[Sub-Agent] Starting agent loop`);
+            console.log(`[Sub-Agent] Model: ${modelId}`);
+            console.log(`[Sub-Agent] Endpoint: ${endpoint}`);
+            console.log(`[Sub-Agent] Tools enabled: ${toolsEnabled}, Role: ${role}`);
+            console.log(`[Sub-Agent] Time limit: ${subAgentTimeLimit}s`);
+          }
 
           while (loops < loopLimit) {
             try {
@@ -2403,6 +2411,29 @@ Always assume relative paths are from this directory.`;
               }
 
               const trimmed = content.trim();
+
+               // --- Prose-Only Response Fallback (after 3 consecutive no-tool-call responses) ---
+               if (!toolCall && noToolCallCount >= 2 && trimmed.length > 0) {
+                 const completionKeywords = [
+                   "done", "completed", "finished", "all done", "task complete",
+                   "i have completed", "successfully created", "here is the summary",
+                   "no further action", "nothing more to do", "task finished"
+                 ];
+
+                 const hasCompletionLanguage = completionKeywords.some(keyword =>
+                   trimmed.toLowerCase().includes(keyword)
+                 );
+
+                 if (hasCompletionLanguage) {
+                   if (subAgentDebugLogging) {
+                     console.log(`[Sub-Agent] Detected completion language after ${noToolCallCount + 1} prose-only responses. Auto-extracting final response.`);
+                   }
+
+                   // Extract as final response instead of waiting for timeout
+                   finalContent = trimmed;
+                   break; // Exit loop with this content
+                 }
+               }
               if (!toolCall && trimmed) {
                 const refusalKeywords = [
                   "i cannot browse", "i don't have access", "i can't access",
