@@ -2940,6 +2940,8 @@ Always assume relative paths are from this directory.`;
         };
 
         // --- 1. Primary Agent Loop ---
+        const startTime = Date.now();
+        const timeoutMs = subAgentTimeLimit * 1000;
         const primaryResult = await runAgentLoop(agent_role, task, context, undefined, false, currentWorkingDirectory);
         if (primaryResult.error) return { error: primaryResult.error };
 
@@ -2960,7 +2962,7 @@ Always assume relative paths are from this directory.`;
             if (subAgentDebugLogging) console.log("[Sub-Agent] Skipping auto-debug: no time remaining.");
           } else {
             const debugTask = `You are a Senior Code Reviewer. 
-Original Task: ${taskPrompt}
+Original Task: ${task}
 Files Created/Modified: ${filesToCheck}
 
 Review the code for these files. Check for:

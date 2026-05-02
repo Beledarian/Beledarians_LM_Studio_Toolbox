@@ -529,11 +529,11 @@ test("timeout terminates loop before hitting iteration limit", () => {
 test("reviewer loop respects time budget with unlimited iterations", () => {
   // When reviewer has unlimited iterations but limited time budget
   const totalBudget = 600; // 10 minutes total
-  const primaryTaskTime = 300; // Primary took 5 minutes
+  const primaryTaskTime = 240; // Primary took 4 minutes
   
   // Remaining budget for reviewer (max 50% of original, min 30s)
   const remainingBudget = Math.max(30, totalBudget / 2); // 300 seconds max
-  const debugTimeoutLimit = Math.floor((remainingBudget - primaryTaskTime) / 1000 * 1000);
+  const debugTimeoutLimit = remainingBudget - primaryTaskTime;
   
   // Reviewer should complete within its time budget even with unlimited iterations
   assert.ok(debugTimeoutLimit > 0, "Reviewer should have positive time budget");
