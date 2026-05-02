@@ -298,6 +298,56 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     });
     tools.push(gitCheckoutTool);
 
+    const gitShowTool = tool({
+      name: "git_show",
+      description: "Show details of a specific git commit including message, author, date, and changes.",
+      parameters: {
+        commit_hash: z.string().optional().describe("The commit hash/reference to show. Defaults to HEAD if omitted."),
+        stat_only: z.boolean().optional().default(false).describe("If true, only show file stats without the full diff."),
+      },
+      implementation: async ({ commit_hash, stat_only = false }) => {
+        const { simpleGit } = await import("simple-git");
+        const git = simpleGit(currentWorkingDirectory);
+        try {
+          const ref = commit_hash || "HEAD";
+          let result;
+          if (stat_only) {
+            // Use git show --stat to get file change statistics without full diff
+            result = await git.raw(["show", "--stat", ref]);
+          } else {
+            result = await git.show([ref]);
+          }
+          return { success: true, output: result };
+        } catch (e) {
+          return { error: `Git show failed: ${e instanceof Error ? e.message : String(e)}` };
+        }
+      },
+    });
+    tools.push(gitShowTool);
+
+    const gitPushTool = tool({
+      name: "git_push",
+      description: "Push local commits to the remote repository.",
+      parameters: {
+        branch: z.string().optional().describe("Optional: The branch to push. Defaults to current branch."),
+      },
+      implementation: async ({ branch }) => {
+        const { simpleGit } = await import("simple-git");
+        const git = simpleGit(currentWorkingDirectory);
+        try {
+          if (branch) {
+            await git.push("origin", branch);
+          } else {
+            await git.push();
+          }
+          return { success: true, message: "Pushed successfully." };
+        } catch (e) {
+          return { error: `Git push failed: ${e instanceof Error ? e.message : String(e)}` };
+        }
+      },
+    });
+    tools.push(gitPushTool);
+
   }
 
   // --- Document Tools ---

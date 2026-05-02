@@ -41,7 +41,7 @@ export const pluginConfigSchematics = createConfigSchematics()
   }, false)
   .field("allowGitOperations", "boolean", {
     displayName: "Allow Git Operations",
-    subtitle: "Enable native git tools (status, diff, commit, log, add, checkout).",
+    subtitle: "Enable native git tools (status, diff, show, commit, log, add, checkout, push).",
   }, true)
   .field("allowGitHubTools", "boolean", {
     displayName: "Allow GitHub CLI Tools",
