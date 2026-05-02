@@ -2818,7 +2818,7 @@ Always assume relative paths are from this directory.`;
                                 const regex = new RegExp(patternToMatch);
                                 isMatch = regex.test(lineToSearch);
                               } catch (e: any) {
-                                return { error: `Invalid regex pattern: ${e.message}` };
+                                return { error: `Invalid regex pattern: ${e.message}`, filesModified };
                               }
                             } else {
                               isMatch = lineToSearch.includes(patternToMatch);
@@ -3464,10 +3464,10 @@ Always assume relative paths are from this directory.`;
 
         finalResponse = primaryResult.response || "";
         handoffMessage = primaryResult.handoff_message;
-        const generatedFiles = [...primaryResult.filesModified];
+        const generatedFiles = [...(primaryResult.filesModified || [])];
 
         // --- 2. Auto-Debug Loop ---
-        if (debugMode && primaryResult.filesModified.length > 0 && !finalResponse.startsWith("[TIMEOUT]")) {
+        if (debugMode && primaryResult.filesModified?.length > 0 && !finalResponse.startsWith("[TIMEOUT]")) {
           const filesToCheck = primaryResult.filesModified.join(", ");
           
           // Calculate remaining time for debug loop (max 50% of original budget, min 30s)
@@ -3492,6 +3492,7 @@ If the code is correct and complete, confirm it.`;
 
             // Pass limited context to avoid blowing up the context window
             let debugContext = `Current Working Directory: ${currentWorkingDirectory}\n\n`;
+            if (!primaryResult.filesModified?.length) return { error: "No files modified" };
             for (const f of primaryResult.filesModified) {
               try {
                 const c = await readFile(join(currentWorkingDirectory, f), "utf-8");
@@ -3506,7 +3507,7 @@ If the code is correct and complete, confirm it.`;
 
             if (!debugResult.error) {
               finalResponse += "\n\n--- Auto-Debug Report ---\n" + (debugResult.response || "Debug pass completed.");
-              if (debugResult.filesModified.length > 0) {
+              if (debugResult.filesModified?.length > 0) {
                 finalResponse += `\n(The reviewer fixed these files: ${debugResult.filesModified.join(", ")})`;
               }
               if (!handoffMessage && debugResult.handoff_message) {
@@ -3519,7 +3520,7 @@ If the code is correct and complete, confirm it.`;
         }
 
         // Append generated file list for Main Agent visibility
-        if (primaryResult.filesModified.length > 0) {
+        if (primaryResult.filesModified?.length > 0) {
           const fullPaths = primaryResult.filesModified.map(f => {
             if (isAbsolute(f)) return f;
             return join(currentWorkingDirectory, f);
@@ -3528,6 +3529,7 @@ If the code is correct and complete, confirm it.`;
 
           if (showFullCode) {
             finalResponse += `\n\n### Generated Code Content:\n`;
+            if (!primaryResult.filesModified?.length) return { error: "No files modified" };
             for (const f of primaryResult.filesModified) {
               try {
                 const fpath = isAbsolute(f) ? f : join(currentWorkingDirectory, f);
@@ -3543,7 +3545,7 @@ If the code is correct and complete, confirm it.`;
         // If nothing was written to disk, leave the raw response intact so the primary agent
         // can see what the sub-agent actually did (or didn't do) rather than being misled
         // by a false "code has been handled" success message.
-        if (!showFullCode && primaryResult.filesModified.length > 0) {
+        if (!showFullCode && primaryResult.filesModified?.length > 0) {
           finalResponse = finalResponse.replace(/```[\s\S]*?```/g, "\n[System: Code Block Hidden for Brevity. The code has been handled/saved by the sub-agent. Do NOT request it again. Proceed.]\n");
         }
 
