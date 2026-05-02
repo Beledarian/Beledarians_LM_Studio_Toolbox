@@ -137,6 +137,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
   const enableWikipedia = pluginConfig.get("enableWikipediaTool");
   const enableLocalRag = pluginConfig.get("enableLocalRag");
   const enableSecondary = pluginConfig.get("enableSecondaryAgent");
+  const subAgentTimeLimit = pluginConfig.get("subAgentTimeLimit");
   const embeddingModelName = pluginConfig.get("embeddingModel");
   // const searchApiKey = pluginConfig.get("searchApiKey"); // Used inside tool
 
@@ -2267,6 +2268,8 @@ Always assume relative paths are from this directory.`;
             if (allowWeb) allowedTools.push("wikipedia_search", "web_search", "duckduckgo_search", "fetch_web_content", "rag_web_content");
             if (allowWeb && allowSubAgentBrowserControl && allowBrowserControl) allowedTools.push("browser_session_open", "browser_session_control", "browser_session_close");
             if (allowCode) allowedTools.push("run_python", "run_javascript");
+            // finish_task is always available for termination
+            allowedTools.push("finish_task");
 
             if (allowedTools.length > 0) {
               const toolsList = allowedTools.join(", ");
@@ -2278,7 +2281,7 @@ Always assume relative paths are from this directory.`;
             }
           }
 
-          currentSystemPrompt += `\n\n## Optional Handoff Message\nIf you want the main agent to relay your findings, include either:\n1) [HANDOFF_MESSAGE]...[/HANDOFF_MESSAGE]\nOR\n2) JSON with a \`handoff_message\` field (optionally with \`response\` or \`final_response\`).`;
+          currentSystemPrompt += `\n\n## Task Completion & Response Structure\nWhen you have completed the task or gathered all necessary information, you MUST call the 'finish_task' tool to terminate.\nDo NOT output 'TASK_COMPLETED' as text. Instead, use:\n{"tool": "finish_task", "args": {"message": "Your final response/summary here...", "status": "success"}}\n\nIf an error occurs that prevents completion, use status: "error" and explain why in the message.\n\n## Optional Handoff Message\nIf you want the main agent to relay your findings, include either:\n1) [HANDOFF_MESSAGE]...[/HANDOFF_MESSAGE]\nOR\n2) JSON with a \`handoff_message\` field (optionally with \`response\` or \`final_response\`).`;
 
           const msgList = [
             { role: "system", content: currentSystemPrompt },
@@ -2295,6 +2298,8 @@ Always assume relative paths are from this directory.`;
           const suggestedReadPath = allowFileSystem
             ? extractLikelyFilePath(`${taskPrompt}\n${contextData}`)
             : null;
+          const startTime = Date.now();
+          const timeoutMs = subAgentTimeLimit * 1000;
 
           while (loops < loopLimit) {
             try {
@@ -2682,14 +2687,37 @@ Always assume relative paths are from this directory.`;
                   }
                 }
 
-                // Check for explicit completion phrase or strict loop limit
-                const planningLikeText = /(?:\bI(?:'ll| will)\b|\blet me\b|\bnext\b|\bfirst\b)/i.test(trimmed);
-                const shouldTreatAsFinalResponse =
-                  executedToolCallCount > 0 &&
-                  trimmed.length >= 120 &&
-                  !planningLikeText;
+                // Check timeout first
+                const elapsedMs = Date.now() - startTime;
+                if (elapsedMs > timeoutMs) {
+                  if (subAgentDebugLogging) {
+                    console.log(`[Sub-Agent] Timeout reached after ${elapsedMs}ms`);
+                  }
+                  finalContent = `[TIMEOUT] Sub-agent exceeded time limit of ${subAgentTimeLimit}s. Task terminated early.`;
+                  break;
+                }
 
-                if (content.includes("TASK_COMPLETED") || shouldTreatAsFinalResponse || loops >= loopLimit - 1) {
+                // Check for explicit finish_task tool call
+                if (toolCall && toolCall.tool === "finish_task") {
+                  noToolCallCount = 0;
+                  executedToolCallCount++;
+                  msgList.push({ role: "assistant", content: content });
+                  
+                  const finishMessage = toolCall.args?.message || "Task completed.";
+                  const status = toolCall.args?.status || "success";
+                  
+                  if (subAgentDebugLogging) {
+                    console.log(`[Sub-Agent] finish_task called with status: ${status}`);
+                  }
+                  
+                  finalContent = finishMessage;
+                  msgList.push({ role: "user", content: `Tool Output: Task finished. Returning result.` });
+                  loops++;
+                  break; // Done via finish_task
+                }
+
+                // Fallback: strict loop limit or explicit completion phrase (legacy support)
+                if (content.includes("TASK_COMPLETED") || loops >= loopLimit - 1) {
                   break; // Done
                 } else {
                   noToolCallCount++;
@@ -2697,7 +2725,7 @@ Always assume relative paths are from this directory.`;
                     msgList.push({ role: "assistant", content: content });
                   }
 
-                  let reminder = "SYSTEM NOTICE: You did not call a tool. If you are finished, output 'TASK_COMPLETED'. If not, USE A TOOL now and return a single JSON tool-call object only (no prose).";
+                  let reminder = "SYSTEM NOTICE: You did not call a tool. If you are finished, CALL 'finish_task' with your final message. If not, USE A TOOL now and return a single JSON tool-call object only (no prose).";
                   if (toolsEnabled) {
                     if (allowFileSystem && suggestedReadPath && noToolCallCount <= 3) {
                       const escapedPath = suggestedReadPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');

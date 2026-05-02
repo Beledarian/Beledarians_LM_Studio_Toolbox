@@ -123,6 +123,13 @@ export const pluginConfigSchematics = createConfigSchematics()
                 displayName: "Sub-Agent: Allow Browser Control",
                 subtitle: "If enabled, sub-agents can use browser automation tools (requires global 'Allow Browser Control' and 'Sub-Agent: Allow Web Search').",
               }, false)
+              .field("subAgentTimeLimit", "numeric", {
+                int: true,
+                min: 30,
+                max: 3600,
+                displayName: "Sub-Agent Time Limit (seconds)",
+                subtitle: "Maximum time allowed for sub-agent tasks before forced termination. Default: 600s (10 mins).",
+              }, 600)
               .field("enableDebugMode", "boolean", {
                 displayName: "Enable Auto-Debug Mode",
                 subtitle: "If enabled, coding tasks delegated to sub-agents will automatically trigger a second 'Reviewer' pass to check for errors.",
