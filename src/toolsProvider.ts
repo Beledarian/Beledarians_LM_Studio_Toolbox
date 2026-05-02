@@ -2214,7 +2214,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           role: string,
           taskPrompt: string,
           contextData: string,
-          loopLimit: number = 8,
+          loopLimit: number = 1000, // Effectively unlimited; timeout is the primary termination mechanism
           forceTools: boolean = false,
           currentWorkingDirectory: string
         ) => {
@@ -2890,7 +2890,7 @@ Always assume relative paths are from this directory.`;
         };
 
         // --- 1. Primary Agent Loop ---
-        const primaryResult = await runAgentLoop(agent_role, task, context, 8, false, currentWorkingDirectory);
+        const primaryResult = await runAgentLoop(agent_role, task, context, undefined, false, currentWorkingDirectory);
         if (primaryResult.error) return { error: primaryResult.error };
 
         finalResponse = primaryResult.response || "";
@@ -2932,8 +2932,8 @@ If the code is correct and complete, confirm it.`;
               } catch (e) { }
             }
 
-            // Run reviewer loop with adjusted timeout
-            const debugResult = await runAgentLoop("reviewer", debugTask, debugContext, 5, true, currentWorkingDirectory);
+            // Run reviewer loop (timeout-enforced, no artificial iteration limit)
+            const debugResult = await runAgentLoop("reviewer", debugTask, debugContext, undefined, true, currentWorkingDirectory);
 
             if (!debugResult.error) {
               finalResponse += "\n\n--- Auto-Debug Report ---\n" + (debugResult.response || "Debug pass completed.");
