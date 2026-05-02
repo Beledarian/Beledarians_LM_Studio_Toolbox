@@ -16,22 +16,22 @@ export function validateToolCall(
   }
 
   if (toolName === "save_file") {
-    const fileName = args.file_name || args.name;
+    const fileName = args.file_name || args.name || args.path;
     const fileContent = args.content || args.data;
 
     if (!fileName && !fileContent) {
-      toolValidationError = `Tool 'save_file' requires parameters: [file_name, content]. Provided keys: ${Object.keys(args).join(", ") || "none"}. Hint: Use 'file_name' (not 'path', 'filepath', or 'file_path') and 'content' (not 'data').`;
+      toolValidationError = `Tool 'save_file' requires parameters: [file_name, content]. Provided keys: ${Object.keys(args).join(", ") || "none"}. Hint: Use 'file_name' (or 'name', or 'path') and 'content' (or 'data').`;
     } else if (!fileName) {
-      toolValidationError = `Tool 'save_file' missing required parameter: 'file_name'. Provided keys: ${Object.keys(args).join(", ")}. Hint: Use 'file_name' not 'path' or 'filepath'.`;
+      toolValidationError = `Tool 'save_file' missing required parameter: 'file_name'. Provided keys: ${Object.keys(args).join(", ")}. Hint: Use 'file_name' (or 'name', or 'path').`;
     } else if (!fileContent) {
-      toolValidationError = `Tool 'save_file' missing required parameter: 'content'. Provided keys: ${Object.keys(args).join(", ")}. Hint: Use 'content' not 'data'.`;
+      toolValidationError = `Tool 'save_file' missing required parameter: 'content'. Provided keys: ${Object.keys(args).join(", ")}. Hint: Use 'content' (or 'data').`;
     } else if (isAbsolute(fileName)) {
       toolValidationError = `Tool 'save_file' rejected absolute path: '${fileName}'. SECURITY: Files can only be saved within workspace. Use relative path like 'test.html'.`;
     }
   }
 
   if (toolName === "read_file") {
-    const fileName = args.file_name;
+    const fileName = args.file_name || args.path;
     if (!fileName) {
       toolValidationError = `Tool 'read_file' requires parameter: [file_name]. Provided keys: ${Object.keys(args).join(", ") || "none"}.`;
     } else if (isAbsolute(fileName)) {
