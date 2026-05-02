@@ -20,6 +20,11 @@ function sanitizeContent(text: string): string {
     .replace(/<\|tool_call\>/gi, "")
     .replace(/<tool_call\|>/gi, "")
     .replace(/<\|.*?\|>/g, "")
+    // Strip XML-style thinking tags (e.g., <antThinking>, <thinking>) emitted by Claude and other models.
+    // These models embed their chain-of-thought in the content field wrapped in these tags.
+    .replace(/<\/?antThinking[^>]*>/gi, "")
+    .replace(/<\/?thinking[^>]*>/gi, "")
+
     // Strip leading "Thought: ..." reasoning block emitted by DeepSeek-R1, QwQ, etc.
     // These models embed their chain-of-thought in the content field prefixed with "Thought:",
     // separated from the actual response by a blank line (or sometimes just a single newline).
