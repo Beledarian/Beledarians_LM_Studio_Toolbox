@@ -2669,6 +2669,11 @@ Always assume relative paths are from this directory.`;
                      if (!normalizedArgs.file_name && normalizedArgs.path) {
                        normalizedArgs.file_name = normalizedArgs.path;
                      }
+                      // Also handle "file_path" (common model variation/hallucination)
+                      if (!normalizedArgs.file_name && normalizedArgs.file_path) {
+                        normalizedArgs.file_name = normalizedArgs.file_path;
+                      }
+
                      if (toolCall.tool === "save_file" && !normalizedArgs.content && normalizedArgs.data) {
                        normalizedArgs.content = normalizedArgs.data;
                      }
@@ -3279,21 +3284,37 @@ Always assume relative paths are from this directory.`;
                   break; // Done
                 } else {
                   noToolCallCount++;
-                  if (content.trim().length > 0) {
-                    msgList.push({ role: "assistant", content: content });
-                  }
 
-                  let reminder = "SYSTEM NOTICE: You did not call a tool. If you are finished, CALL 'finish_task' with your final message. If not, USE A TOOL now and return a single JSON tool-call object only (no prose).";
-                  if (toolsEnabled) {
-                    if (allowFileSystem && suggestedReadPath && noToolCallCount <= 3) {
-                      const escapedPath = suggestedReadPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-                      reminder += `\nSuggested next step: {"tool":"read_file","args":{"file_name":"${escapedPath}"}}`;
-                    } else if (allowFileSystem && noToolCallCount <= 3) {
-                      reminder += `\nSuggested next step: {"tool":"list_directory","args":{}}`;
+                  // --- Fix: Detect empty-output death spiral ---
+                  // When the model outputs nothing after tool calls have been made, adding more system
+                  // notices just makes it worse. Break out with what we have instead of spinning forever.
+                  if (content.trim().length === 0 && executedToolCallCount > 0) {
+                    if (subAgentDebugLogging) {
+                      console.log(`[Sub-Agent] Model outputting nothing after ${noToolCallCount} attempts. Breaking to prevent death spiral.`);
                     }
+                    finalContent = `Model stopped producing responses after ${executedToolCallCount} tool call(s). Task terminated early.`;
+                    break;
                   }
 
-                  msgList.push({ role: "system", content: reminder });
+                  // --- Fix: Cap system notices to avoid context bloat and model confusion ---
+                  const maxSystemNotices = 2;
+                  if (content.trim().length > 0 || noToolCallCount <= maxSystemNotices) {
+                    if (content.trim().length > 0) {
+                      msgList.push({ role: "assistant", content: content });
+                    }
+
+                    let reminder = "SYSTEM NOTICE: You did not call a tool. If you are finished, CALL 'finish_task' with your final message. If not, USE A TOOL now and return a single JSON tool-call object only (no prose).";
+                    if (toolsEnabled) {
+                      if (allowFileSystem && suggestedReadPath && noToolCallCount <= 3) {
+                        const escapedPath = suggestedReadPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+                        reminder += `\nSuggested next step: {"tool":"read_file","args":{"file_name":"${escapedPath}"}}`;
+                      } else if (allowFileSystem && noToolCallCount <= 3) {
+                        reminder += `\nSuggested next step: {"tool":"list_directory","args":{}}`;
+                      }
+                    }
+
+                    msgList.push({ role: "system", content: reminder });
+                  }
                   loops++;
                 }
               }
