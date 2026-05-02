@@ -391,6 +391,28 @@ function parseToolCallFromContent(text: string): ParsedToolCall | null {
     const parsedTool = parseToolCallObject(parsedJson, text);
     if (parsedTool) return parsedTool;
   }
+
+  // --- Fix: Fallback for mixed prose+JSON tool calls ---
+  // When the model outputs something like:
+  //   "Now I have data... {"tool": "save_file", "args": {...}}"
+  // The balanced JSON extractor above may fail because the whole text isn't valid JSON.
+  // This fallback specifically looks for tool call patterns embedded within prose text.
+  const toolMatch = text.match(/\{"[\s]*tool[\s]*"[\s]*:[\s]*"([a-zA-Z0-9_.-]+)"/);
+  if (toolMatch) {
+    // Find the matching closing brace by looking for args object
+    const argsStartIdx = text.indexOf('{', toolMatch.index || 0);
+    if (argsStartIdx >= 0) {
+      const closeBraceIdx = findMatchingBrace(text, argsStartIdx);
+      if (closeBraceIdx > 0) {
+        const jsonSnippet = text.slice(argsStartIdx, closeBraceIdx + 1);
+        const parsedJson = tryParseJson(jsonSnippet);
+        if (parsedJson && isRecord(parsedJson)) {
+          const parsedTool = parseToolCallObject(parsedJson, text);
+          if (parsedTool) return parsedTool;
+        }
+      }
+    }
+  }
   return null;
 }
 
