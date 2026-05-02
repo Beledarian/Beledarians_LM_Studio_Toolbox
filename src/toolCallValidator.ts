@@ -10,6 +10,11 @@ export function validateToolCall(
 ): string | null {
   let toolValidationError: string | null = null;
 
+  // finish_task is always allowed - it's the termination signal, not an executable tool
+  if (toolName === "finish_task") {
+    return null; // Always valid, no parameters required beyond optional message/status
+  }
+
   if (toolName === "save_file") {
     const fileName = args.file_name || args.name;
     const fileContent = args.content || args.data;

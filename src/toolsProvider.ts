@@ -2359,18 +2359,88 @@ Always assume relative paths are from this directory.`;
             console.log(`[Sub-Agent] Time limit: ${subAgentTimeLimit}s`);
           }
 
+
+          // --- Stateful Chat Support with Session Isolation ---
+          let previousResponseId: string | null = null;
+          const baseUrl = endpoint.replace(/\/v1$/, '');
+          const statefulEndpoint = `${baseUrl}/api/v1/chat`;
+          let useStatefulChat = true;
+
+          // Generate unique session ID for this sub-agent invocation to prevent cross-contamination
+          const sessionId = `subagent_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
           while (loops < loopLimit) {
             try {
-              const response = await fetch(`${endpoint}/chat/completions`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
+
+              // Build request body - different for first vs subsequent iterations
+              let requestBody: any;
+
+              if (!previousResponseId) {
+                // First iteration - send full system prompt + task with fresh session
+                requestBody = {
                   model: modelId,
-                  messages: msgList,
-                  temperature: 0.7,
-                  stream: false
-                })
-              });
+                  input: `${currentSystemPrompt}\n\nTask: ${taskPrompt}\n\nContext: ${contextData}${toolsReminder}`,
+                  temperature: 0.7
+                };
+              } else {
+                // Subsequent iterations - just send tool output or reminder
+                const latestMsg = msgList[msgList.length - 1];
+                requestBody = {
+                  model: modelId,
+                  input: latestMsg?.content || "",
+                  previous_response_id: previousResponseId,
+                  temperature: 0.7
+                };
+              }
+
+              let response: Response;
+              try {
+                if (useStatefulChat) {
+                  response = await fetch(statefulEndpoint, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(requestBody)
+                  });
+
+                  // If stateful endpoint returns 404, switch to fallback permanently
+                  if (response.status === 404) {
+                    useStatefulChat = false;
+                    previousResponseId = null; // Reset to start fresh with fallback
+                    if (subAgentDebugLogging) {
+                      console.log(`[Sub-Agent] Stateful chat endpoint not available, falling back to /chat/completions`);
+                    }
+                    continue; // Retry with fallback endpoint
+                  }
+                } else {
+                  response = await fetch(`${endpoint}/chat/completions`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      model: modelId,
+                      messages: msgList,
+                      temperature: 0.7,
+                      stream: false
+                    })
+                  });
+                }
+              } catch (fetchError) {
+                // Fallback to OpenAI-compatible endpoint if stateful fails
+                if (useStatefulChat && subAgentDebugLogging) {
+                  console.log(`[Sub-Agent] Stateful chat failed, falling back to /chat/completions`);
+                }
+                useStatefulChat = false;
+
+                response = await fetch(`${endpoint}/chat/completions`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    model: modelId,
+                    messages: msgList,
+                    temperature: 0.7,
+                    stream: false
+                  })
+                });
+              }
 
               if (!response.ok) {
                 const errorBody = await response.text().catch(() => "");
@@ -2378,19 +2448,80 @@ Always assume relative paths are from this directory.`;
                 if (subAgentDebugLogging) {
                   console.log(`[Sub-Agent] API error status=${response.status} body=${compactErrorBody}`);
                 }
-                const details = compactErrorBody ? ` - ${compactErrorBody}` : "";
-                return { error: `API Error: ${response.status}${details}`, filesModified };
+
+                // If it's a 400/422 template error and we have message history, try to recover by trimming context
+                if ((response.status === 400 || response.status === 422) && msgList.length > 3) {
+                  if (subAgentDebugLogging) {
+                    console.log(`[Sub-Agent] Template error detected, attempting recovery by trimming message history...`);
+                  }
+                  // Keep system prompt + last few exchanges to reduce context and fix template issues
+                  const systemMsg = msgList[0];
+                  const recentMsgs = msgList.slice(-6); // Keep last 3 tool call/response pairs
+                  msgList.length = 0;
+                  msgList.push(systemMsg, ...recentMsgs);
+
+                  // Retry the request with trimmed context
+                  response = await fetch(`${endpoint}/chat/completions`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      model: modelId,
+                      messages: msgList,
+                      temperature: 0.7,
+                      stream: false
+                    })
+                  });
+
+                  // If retry still fails, then give up
+                  if (!response.ok) {
+                    const retryError = await response.text().catch(() => "");
+                    const details = retryError.replace(/\s+/g, " ").trim().substring(0, 600);
+                    return { error: `API Error after recovery attempt: ${response.status} - ${details}`, filesModified };
+                  }
+                } else {
+                  // Non-recoverable error or first attempt
+                  const details = compactErrorBody ? ` - ${compactErrorBody}` : "";
+                  return { error: `API Error: ${response.status}${details}`, filesModified };
+                }
               }
 
               const data = await response.json();
-              const message = data?.choices?.[0]?.message;
-              const parsedMessage = parseSubAgentResponseMessage(message);
+
+              // Parse response - handle both stateful and OpenAI-compatible formats
+              let messageContent: string;
+              if (useStatefulChat && previousResponseId !== null) {
+                // Stateful API returns {output: [{type: "message", content: "..."}], response_id: "..."}
+                if (data.response_id) {
+                  previousResponseId = data.response_id;
+                }
+
+                if (data.output && Array.isArray(data.output)) {
+                  messageContent = "";
+                  for (const item of data.output) {
+                    if (item.type === "message" && item.content) {
+                      messageContent += item.content;
+                    }
+                  }
+                } else if (data.message?.content) {
+                  // Fallback format
+                  messageContent = data.message.content;
+                } else {
+                  messageContent = "";
+                }
+              } else {
+                // OpenAI-compatible format
+                const message = data?.choices?.[0]?.message;
+                messageContent = typeof message === "string" ? message : (message?.content || "");
+              }
+
+              const parsedMessage = parseSubAgentResponseMessage({ role: "assistant", content: messageContent });
               const content = parsedMessage.content;
               let toolCall: ParsedToolCall | null = parsedMessage.toolCall;
 
+
               if (subAgentDebugLogging) {
                 const preview = content.substring(0, 200);
-                console.log(`[Sub-Agent] Parse result source=${parsedMessage.toolCallSource} hasToolCall=${Boolean(toolCall)} preview=${preview}`);
+                console.log(`[Sub-Agent] Iteration ${loops + 1}: toolCall=${Boolean(toolCall)}, source=${parsedMessage.toolCallSource}, noToolCalls=${noToolCallCount}, preview=${preview}`);
               }
 
               // Always capture the latest content as the finalContent candidate
@@ -2706,7 +2837,22 @@ Always assume relative paths are from this directory.`;
                     }
                   }
 
-                  if (!toolResult) toolResult = "Error: Tool not found/allowed.";
+                  // --- Special Handling: finish_task is a termination signal, not an executable tool ---
+                  if (toolCall.tool === "finish_task") {
+                    const finishMessage = toolCall.args?.message || "Task completed.";
+                    const status = toolCall.args?.status || "success";
+
+                    if (subAgentDebugLogging) {
+                      console.log(`[Sub-Agent] finish_task called with status: ${status}`);
+                    }
+
+                    finalContent = finishMessage;
+                    msgList.push({ role: "user", content: `Tool Output: Task finished. Returning result.` });
+                    loops++;
+                    break; // Exit the agent loop - task is complete
+                  } else if (!toolResult) {
+                    toolResult = "Error: Tool not found/allowed.";
+                  }
                   } // Close the else { block from validation check
 
                 } catch (err: any) { toolResult = `Error: ${err.message}`; }
@@ -2967,6 +3113,23 @@ Always assume relative paths are from this directory.`;
             }
           }
 
+
+          // --- Diagnostic Logging Termination ---
+          if (subAgentDebugLogging) {
+            let terminationReason = "unknown";
+            if (finalContent.startsWith("[TIMEOUT]")) {
+              terminationReason = "timeout";
+            } else if (executedToolCallCount > 0 && noToolCallCount >= 2) {
+              terminationReason = "prose_fallback";
+            } else if (loops >= loopLimit - 1) {
+              terminationReason = "loop_limit";
+            } else if (noToolCallCount === 0 && executedToolCallCount > 0) {
+              terminationReason = "finish_task";
+            }
+
+            console.log(`[Sub-Agent] Loop terminated: ${terminationReason}`);
+            console.log(`[Sub-Agent] Total iterations: ${loops}, Tool calls executed: ${executedToolCallCount}, No-tool-call streak: ${noToolCallCount}`);
+          }
           return { response: finalContent, filesModified, handoff_message: handoffMessage || undefined };
         };
 
