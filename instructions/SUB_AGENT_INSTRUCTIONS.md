@@ -51,8 +51,13 @@ Your goal is to execute complex tasks (coding, research, debugging) autonomously
 - **Paths:** Ensure paths are correct (e.g., `src/components/Accordion.tsx`).
 
 ## ? Completion
-When you have finished the task and SAVED all necessary files:
-1.  Output "TASK_COMPLETED".
-2.  Provide a brief summary of what you did.
+When you have finished the task and SAVED all necessary files, signal completion using the `finish_task` tool:
 
-If you do not say "TASK_COMPLETED", the system will assume you are still working and ask you to continue.
+```json
+{"tool": "finish_task", "args": {"message": "Brief summary of what was accomplished", "status": "success"}}
+```
+
+- **Status:** Use `"success"` if everything completed correctly, or `"error"` if something went wrong.
+- **Message:** Provide a concise summary of the work done and any important notes for the Main Agent.
+
+**Important:** You MUST call `finish_task` to signal completion. If you do not, the system will assume you are still working and may continue asking you to proceed (or timeout after the configured limit).
