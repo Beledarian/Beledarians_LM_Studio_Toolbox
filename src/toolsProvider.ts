@@ -3,6 +3,7 @@ import { spawn } from "child_process";
 import { rm, writeFile, readdir, readFile, stat, mkdir, rename, copyFile, appendFile } from "fs/promises";
 import * as os from "os";
 import { join, resolve, dirname, isAbsolute, relative } from "path";
+import { randomBytes } from "crypto";
 import { z } from "zod";
 import { pluginConfigSchematics } from "./config";
 import { findLMStudioHome } from "./findLMStudioHome";
@@ -2376,7 +2377,7 @@ Always assume relative paths are from this directory.`;
           let useStatefulChat = true;
 
           // Generate unique session ID for this sub-agent invocation to prevent cross-contamination
-          const sessionId = `subagent_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+          const sessionId = `subagent_${Date.now()}_${randomBytes(8).toString("hex")}`;
 
           while (loops < loopLimit) {
             try {
