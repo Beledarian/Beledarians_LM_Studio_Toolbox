@@ -1,0 +1,10 @@
+src/toolsProvider.ts(3467,36): error TS2488: Type 'string[] | undefined' must have a '[Symbol.iterator]()' method that returns an iterator.
+src/toolsProvider.ts(3470,26): error TS18048: 'primaryResult.filesModified' is possibly 'undefined'.
+src/toolsProvider.ts(3471,32): error TS18048: 'primaryResult.filesModified' is possibly 'undefined'.
+src/toolsProvider.ts(3495,29): error TS18048: 'primaryResult.filesModified' is possibly 'undefined'.
+src/toolsProvider.ts(3509,19): error TS18048: 'debugResult.filesModified' is possibly 'undefined'.
+src/toolsProvider.ts(3510,72): error TS18048: 'debugResult.filesModified' is possibly 'undefined'.
+src/toolsProvider.ts(3522,13): error TS18048: 'primaryResult.filesModified' is possibly 'undefined'.
+src/toolsProvider.ts(3523,29): error TS18048: 'primaryResult.filesModified' is possibly 'undefined'.
+src/toolsProvider.ts(3531,29): error TS18048: 'primaryResult.filesModified' is possibly 'undefined'.
+src/toolsProvider.ts(3546,30): error TS18048: 'primaryResult.filesModified' is possibly 'undefined'.
