@@ -2454,13 +2454,16 @@ Always assume relative paths are from this directory.`;
                   if (subAgentDebugLogging) {
                     console.log(`[Sub-Agent] Template error detected, attempting recovery by trimming message history...`);
                   }
-                  // Keep system prompt + last few exchanges to reduce context and fix template issues
+                  // Keep system prompt + original user task + last few exchanges to reduce context and fix template issues
+                  // CRITICAL: LM Studio's Jinja template requires a proper "user" message with an actual query.
+                  // After many tool call/response cycles, all "user" messages become just "Tool Output: ..." which breaks the template.
                   const systemMsg = msgList[0];
-                  const recentMsgs = msgList.slice(-6); // Keep last 3 tool call/response pairs
+                  const userTaskMsg = msgList[1]; // The original task prompt - MUST be preserved!
+                  const recentMsgs = msgList.slice(-4); // Keep last 2 tool call/response pairs
                   msgList.length = 0;
-                  msgList.push(systemMsg, ...recentMsgs);
+                  msgList.push(systemMsg, userTaskMsg, ...recentMsgs);
 
-                  // Retry the request with trimmed context
+                  // Retry the request with trimmed context that includes a proper user message
                   response = await fetch(`${endpoint}/chat/completions`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
@@ -2472,11 +2475,34 @@ Always assume relative paths are from this directory.`;
                     })
                   });
 
-                  // If retry still fails, then give up
+                  // If retry still fails, try one more aggressive trim with a synthetic user reminder
                   if (!response.ok) {
-                    const retryError = await response.text().catch(() => "");
-                    const details = retryError.replace(/\s+/g, " ").trim().substring(0, 600);
-                    return { error: `API Error after recovery attempt: ${response.status} - ${details}`, filesModified };
+                    if (subAgentDebugLogging) {
+                      console.log(`[Sub-Agent] First recovery failed, trying with synthetic user reminder...`);
+                    }
+                    msgList.length = 0;
+                    msgList.push(
+                      systemMsg,
+                      { role: "user", content: `Continue working on the task. Recent tool output:\n${recentMsgs[recentMsgs.length - 1]?.content || "Proceed with the task."}` }
+                    );
+
+                    response = await fetch(`${endpoint}/chat/completions`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        model: modelId,
+                        messages: msgList,
+                        temperature: 0.7,
+                        stream: false
+                      })
+                    });
+
+                    // If this also fails, then give up
+                    if (!response.ok) {
+                      const retryError = await response.text().catch(() => "");
+                      const details = retryError.replace(/\s+/g, " ").trim().substring(0, 600);
+                      return { error: `API Error after recovery attempt: ${response.status} - ${details}`, filesModified };
+                    }
                   }
                 } else {
                   // Non-recoverable error or first attempt
@@ -2968,14 +2994,6 @@ Always assume relative paths are from this directory.`;
               }
             } catch (err: any) { return { error: err.message, filesModified }; }
 
-            // Prevent unbounded memory growth
-            if (msgList.length > 20) {
-              // Keep system message (index 0) and last 18 messages
-              const systemMsg = msgList[0];
-              const recentMsgs = msgList.slice(-18);
-              msgList.length = 0;
-              msgList.push(systemMsg, ...recentMsgs);
-            }
           }
 
           if (finalContent) {
