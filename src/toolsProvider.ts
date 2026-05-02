@@ -2898,27 +2898,54 @@ Always assume relative paths are from this directory.`;
         const generatedFiles = [...primaryResult.filesModified];
 
         // --- 2. Auto-Debug Loop ---
-        if (debugMode && primaryResult.filesModified.length > 0) {
+        if (debugMode && primaryResult.filesModified.length > 0 && !finalResponse.startsWith("[TIMEOUT]")) {
           const filesToCheck = primaryResult.filesModified.join(", ");
-          const debugTask = `Review the code in these files: ${filesToCheck}. Check for bugs, syntax errors, or logic flaws. If you find any, use 'save_file' to FIX them. If they are correct, confirm it.`;
+          
+          // Calculate remaining time for debug loop (max 50% of original budget, min 30s)
+          const elapsedMs = Date.now() - startTime;
+          const remainingBudget = Math.max(30000, timeoutMs / 2);
+          const debugTimeoutLimit = Math.floor((remainingBudget - elapsedMs) / 1000);
 
-          // Read content of modified files to pass as context
-          let debugContext = "Here is the content of the created files:\n";
-          for (const f of primaryResult.filesModified) {
-            try {
-              const c = await readFile(join(currentWorkingDirectory, f), "utf-8");
-              debugContext += `\n--- ${f} ---\n${c}\n`;
-            } catch (e) { }
-          }
+          if (debugTimeoutLimit <= 0) {
+            if (subAgentDebugLogging) console.log("[Sub-Agent] Skipping auto-debug: no time remaining.");
+          } else {
+            const debugTask = `You are a Senior Code Reviewer. 
+Original Task: ${taskPrompt}
+Files Created/Modified: ${filesToCheck}
 
-          const debugResult = await runAgentLoop("reviewer", debugTask, debugContext, 5, true, currentWorkingDirectory);
+Review the code for these files. Check for:
+1. Syntax errors and logic flaws.
+2. Security vulnerabilities or unsafe practices.
+3. Whether it actually fulfills the original task requirements.
 
-          finalResponse += "\n\n--- Auto-Debug Report ---\n" + (debugResult.response || "Debug pass completed.");
-          if (debugResult.filesModified.length > 0) {
-            finalResponse += `\n(The reviewer fixed these files: ${debugResult.filesModified.join(", ")})`;
-          }
-          if (!handoffMessage && debugResult.handoff_message) {
-            handoffMessage = debugResult.handoff_message;
+If you find issues, use 'save_file' to FIX them completely. 
+If the code is correct and complete, confirm it.`;
+
+            // Pass limited context to avoid blowing up the context window
+            let debugContext = `Current Working Directory: ${currentWorkingDirectory}\n\n`;
+            for (const f of primaryResult.filesModified) {
+              try {
+                const c = await readFile(join(currentWorkingDirectory, f), "utf-8");
+                // Cap file content to ~5KB to prevent context overflow
+                const limitedContent = c.length > 5000 ? c.substring(0, 5000) + "\n... (truncated)" : c;
+                debugContext += `--- ${f} ---\n${limitedContent}\n`;
+              } catch (e) { }
+            }
+
+            // Run reviewer loop with adjusted timeout
+            const debugResult = await runAgentLoop("reviewer", debugTask, debugContext, 5, true, currentWorkingDirectory);
+
+            if (!debugResult.error) {
+              finalResponse += "\n\n--- Auto-Debug Report ---\n" + (debugResult.response || "Debug pass completed.");
+              if (debugResult.filesModified.length > 0) {
+                finalResponse += `\n(The reviewer fixed these files: ${debugResult.filesModified.join(", ")})`;
+              }
+              if (!handoffMessage && debugResult.handoff_message) {
+                handoffMessage = debugResult.handoff_message;
+              }
+            } else {
+              finalResponse += "\n\n--- Auto-Debug Report ---\n[Error during review pass: " + debugResult.error + "]";
+            }
           }
         }
 
