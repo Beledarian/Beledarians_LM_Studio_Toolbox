@@ -2728,18 +2728,20 @@ Always assume relative paths are from this directory.`;
                           ? `Success: Saved ${savedList.length} files: ${savedList.join(", ")}`
                           : "Error: No valid files found in batch.";
                       } else {
-                        // Handle varying argument names (some models use name/data instead of file_name/content)
-                        const fileName = toolCall.args?.file_name || toolCall.args?.name || toolCall.args?.path;
-                        const content = toolCall.args?.content || toolCall.args?.data;
+                        const fileName = toolCall.args?.file_name;
+                        const content = toolCall.args?.content;
 
-                        if (fileName && content) {
+                        if (fileName && (typeof content === "string")) {
                           const fpath = validatePath(currentWorkingDirectory, fileName);
                           await mkdir(dirname(fpath), { recursive: true });
                           await writeFile(fpath, content, "utf-8");
-                          toolResult = `Success: File saved to ${fpath}`;
+                          toolResult = `Success: File saved to ${fileName}`;
                           filesModified.push(fileName);
                         } else {
-                          toolResult = "Error: Missing 'file_name' (or 'name', 'path') or 'content' (or 'data') arguments.";
+                          const missing = [];
+                          if (!fileName) missing.push("file_name");
+                          if (typeof content !== "string") missing.push("content");
+                          toolResult = `Error: Missing required arguments for save_file: [${missing.join(", ")}].`;
                         }
                       }
                     } else if (toolCall.tool === "replace_text_in_file" && toolCall.args?.file_name && toolCall.args?.old_string && toolCall.args?.new_string) {
