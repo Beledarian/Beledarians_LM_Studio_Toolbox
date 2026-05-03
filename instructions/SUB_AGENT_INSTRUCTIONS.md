@@ -223,7 +223,14 @@ Your goal is to execute complex tasks (coding, research, debugging) autonomously
 
 ## ? Common Mistakes to Avoid
 
-1. **Wrong parameter names:** 
+1. **Hallucinated tool names:** 
+   - ?? **DO NOT use `write_file`**. Use **`save_file`** instead.
+   - ?? **DO NOT use `savefile`**. Use **`save_file`** instead.
+   - ?? **DO NOT use `ls`**. Use **`list_directory`** instead.
+   - ?? **DO NOT use `grep`**. Use **`search_file_content`** instead.
+   - ?? **DO NOT use `readfile`**. Use **`read_file`** instead.
+
+2. **Wrong parameter names:**
    - ?? Use `file_name` NOT `path` or `filepath` for file operations
    - ?? Use `content` NOT `data` for save_file
    - ?? Use `query` NOT `pattern` for fuzzy_find_local_files
