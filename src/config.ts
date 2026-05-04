@@ -1,143 +1,182 @@
 import { createConfigSchematics } from "@lmstudio/sdk";
+import { getSystemDict } from "./locales/i18n";
+
+// ─────────────────────────────────────────────────────────────
+// Layer 1: Detect system locale once at plugin boot.
+// The dictionary is loaded synchronously here so that
+// withConfigSchematics() — which can only be called once — uses
+// the correct translated strings immediately.
+// ─────────────────────────────────────────────────────────────
+const { dict: t, resolvedLocale } = getSystemDict();
+const c = t.config;
 
 export const pluginConfigSchematics = createConfigSchematics()
+  // ── Layer 2: Message Language (dynamic runtime language selector) ──────────
+  .field("messageLanguage", "string", {
+    displayName: c.messageLanguage.displayName,
+    subtitle: c.messageLanguage.subtitle,
+  }, resolvedLocale)
+
+  // ── Planning ───────────────────────────────────────────────────────────────
   .field("planMode", "string", {
-    displayName: "Plan Mode",
-    subtitle: "Controls when the model should explore and propose a plan before making changes. Options: 'always', 'when_useful', 'never'.",
+    displayName: c.planMode.displayName,
+    subtitle: c.planMode.subtitle,
   }, "when_useful")
+
+  // ── Retrieval ──────────────────────────────────────────────────────────────
   .field("retrievalLimit", "numeric", {
     int: true,
     min: 1,
-    displayName: "Retrieval Limit",
-    subtitle: "When retrieval is triggered, this is the maximum number of chunks to return.",
+    displayName: c.retrievalLimit.displayName,
+    subtitle: c.retrievalLimit.subtitle,
     slider: { min: 1, max: 10, step: 1 },
   }, 3)
   .field("retrievalAffinityThreshold", "numeric", {
     min: 0.0,
     max: 1.0,
-    displayName: "Retrieval Affinity Threshold",
-    subtitle: "The minimum similarity score for a chunk to be considered relevant.",
+    displayName: c.retrievalAffinityThreshold.displayName,
+    subtitle: c.retrievalAffinityThreshold.subtitle,
     slider: { min: 0.0, max: 1.0, step: 0.01 },
   }, 0.5)
+
+  // ── Execution Permissions ──────────────────────────────────────────────────
   .field("allowJavascriptExecution", "boolean", {
-    displayName: "Allow JavaScript Execution",
-    subtitle: "Enable the 'run_javascript' tool. DANGER: Code runs on your machine.",
+    displayName: c.allowJavascriptExecution.displayName,
+    subtitle: c.allowJavascriptExecution.subtitle,
   }, false)
   .field("allowPythonExecution", "boolean", {
-    displayName: "Allow Python Execution",
-    subtitle: "Enable the 'run_python' tool. DANGER: Code runs on your machine.",
+    displayName: c.allowPythonExecution.displayName,
+    subtitle: c.allowPythonExecution.subtitle,
   }, false)
   .field("allowTerminalExecution", "boolean", {
-    displayName: "Allow Terminal Execution",
-    subtitle: "Enable the 'run_in_terminal' tool. Opens real terminal windows.",
+    displayName: c.allowTerminalExecution.displayName,
+    subtitle: c.allowTerminalExecution.subtitle,
   }, false)
   .field("allowShellCommandExecution", "boolean", {
-    displayName: "Allow Shell Command Execution",
-    subtitle: "Enable the 'execute_command' tool. DANGER: Commands run on your machine.",
+    displayName: c.allowShellCommandExecution.displayName,
+    subtitle: c.allowShellCommandExecution.subtitle,
   }, false)
   .field("allowBrowserControl", "boolean", {
-    displayName: "Allow Browser Control",
-    subtitle: "Enable browser automation tools ('browser_open_page' and browser session tools). DANGER: Automated browsing/actions run on your machine.",
+    displayName: c.allowBrowserControl.displayName,
+    subtitle: c.allowBrowserControl.subtitle,
   }, false)
   .field("allowGitOperations", "boolean", {
-    displayName: "Allow Git Operations",
-    subtitle: "Enable native git tools (status, diff, commit, log, add, checkout).",
+    displayName: c.allowGitOperations.displayName,
+    subtitle: c.allowGitOperations.subtitle,
   }, true)
   .field("allowGitHubTools", "boolean", {
-    displayName: "Allow GitHub CLI Tools",
-    subtitle: "Enable native GitHub CLI tools (gh_auth, gh_create_issue/pr, gh_list_issues/prs, gh_view_comments/diff, gh_push). Requires 'gh' installed.",
+    displayName: c.allowGitHubTools.displayName,
+    subtitle: c.allowGitHubTools.subtitle,
   }, true)
   .field("allowDatabaseInspection", "boolean", {
-    displayName: "Allow Database Inspection",
-    subtitle: "Enable 'query_database' for SQLite files.",
+    displayName: c.allowDatabaseInspection.displayName,
+    subtitle: c.allowDatabaseInspection.subtitle,
   }, false)
   .field("allowSystemNotifications", "boolean", {
-    displayName: "Allow System Notifications",
-    subtitle: "Enable the agent to send OS notifications.",
+    displayName: c.allowSystemNotifications.displayName,
+    subtitle: c.allowSystemNotifications.subtitle,
   }, true)
   .field("allowAllCode", "boolean", {
-    displayName: "Allow All Code Execution",
-    subtitle: "MASTER SWITCH: Overrides all other settings to enable ALL execution tools.",
+    displayName: c.allowAllCode.displayName,
+    subtitle: c.allowAllCode.subtitle,
   }, false)
+
+  // ── Search / Embedding ─────────────────────────────────────────────────────
   .field("searchApiKey", "string", {
-    displayName: "Search API Key",
-    subtitle: "Optional API key for search services (if supported) to avoid rate limits.",
+    displayName: c.searchApiKey.displayName,
+    subtitle: c.searchApiKey.subtitle,
   }, "")
   .field("embeddingModel", "string", {
-    displayName: "Embedding Model",
-    subtitle: "Model to use for RAG features (default: nomic-ai/nomic-embed-text-v1.5-GGUF)",
+    displayName: c.embeddingModel.displayName,
+    subtitle: c.embeddingModel.subtitle,
   }, "nomic-ai/nomic-embed-text-v1.5-GGUF")
-    .field("defaultWorkspacePath", "string", {
-      displayName: "Default Workspace Path",
-      subtitle: "Optional startup workspace path. Leave empty to use the built-in default workspace directory.",
-    }, "")
-    .field("enableMemory", "boolean", {
-      displayName: "Enable Memory",
-      subtitle: "If enabled, the model can save and recall information from a 'memory.md' file in the workspace.",
-    }, false)
-    .field("enableWikipediaTool", "boolean", {
-      displayName: "Enable Wikipedia Tool",
-      subtitle: "Enable the 'wikipedia_search' tool.",
-    }, true)
-    .field("enableLocalRag", "boolean", {
-      displayName: "Enable Local RAG",
-      subtitle: "Enable the 'rag_local_files' tool for searching workspace files.",
-    }, true)
-    .field("enableSecondaryAgent", "boolean", {
-      displayName: "Enable Secondary Agent/Model",
-      subtitle: "Allow the main model to delegate tasks to a secondary model (e.g., for summarization).",
-    }, false)
-    .field("useMainModelForSubAgent", "boolean", {
-      displayName: "Use Main Model as Sub-Agent",
-      subtitle: "If enabled, the sub-agent loop will use your main LM Studio server (localhost:1234). Ignores 'Endpoint' setting.",
-    }, false)
-    .field("secondaryAgentEndpoint", "string", {
-      displayName: "Secondary Agent Endpoint",
-      subtitle: "The API endpoint for the secondary model (e.g., 'http://localhost:1234/v1').",
-    }, "http://localhost:1234/v1")
-    .field("secondaryModelId", "string", {
-      displayName: "Secondary Model ID",
-      subtitle: "The ID of the model to use for the secondary agent (must be loaded/available).",
-    }, "local-model") // Default to generic
-        .field("subAgentProfiles", "string", {
-          displayName: "Sub-Agent Profiles (JSON)",
-          subtitle: "Define available sub-agents. Format: {\"coder\": \"You are a coding expert...\", ...}",
-        }, '{"summarizer": "You are a summarization expert. Summarize the content concisely.", "coder": "You are a software engineer. Write efficient and safe code."}')
-          .field("subAgentFrequency", "string", {
-            displayName: "Sub-Agent Frequency",
-            subtitle: "Controls how often the agent is encouraged to delegate. Options: 'always', 'when_useful', 'hard_tasks', 'never'.",
-          }, "when_useful")
-          .field("subAgentAllowFileSystem", "boolean", {
-            displayName: "Sub-Agent: Allow File System",
-            subtitle: "If enabled, sub-agents can read/list files.",
-          }, true)
-          .field("subAgentAllowWeb", "boolean", {
-            displayName: "Sub-Agent: Allow Web Search",
-            subtitle: "If enabled, sub-agents can use Wikipedia and DuckDuckGo.",
-          }, true)
-            .field("subAgentAllowCode", "boolean", {
-              displayName: "Sub-Agent: Allow Code Execution",
-              subtitle: "If enabled, sub-agents can run Python/JS code. DANGER!",
-            }, false)
-              .field("subAgentAllowBrowserControl", "boolean", {
-                displayName: "Sub-Agent: Allow Browser Control",
-                subtitle: "If enabled, sub-agents can use browser automation tools (requires global 'Allow Browser Control' and 'Sub-Agent: Allow Web Search').",
-              }, false)
-              .field("enableDebugMode", "boolean", {
-                displayName: "Enable Auto-Debug Mode",
-                subtitle: "If enabled, coding tasks delegated to sub-agents will automatically trigger a second 'Reviewer' pass to check for errors.",
-              }, false)
-                .field("enableSubAgentDebugLogging", "boolean", {
-                  displayName: "Enable Sub-Agent Debug Logging",
-                  subtitle: "If enabled, logs sub-agent tool-call parsing details to the console for troubleshooting.",
-                }, false)
-                .field("subAgentAutoSave", "boolean", {
-                  displayName: "Sub-Agent: Auto-Save Code",
-                  subtitle: "If enabled, code blocks generated by the sub-agent that aren't explicitly saved will be automatically saved to files.",
-                }, true)
-                .field("showFullCodeOutput", "boolean", {
-                  displayName: "Show Full Code Output",
-                  subtitle: "If enabled, the Main Agent will display the full code content of generated files instead of just the file paths.",
-                }, false)
-                .build();
-              
+
+  // ── Workspace ──────────────────────────────────────────────────────────────
+  .field("defaultWorkspacePath", "string", {
+    displayName: c.defaultWorkspacePath.displayName,
+    subtitle: c.defaultWorkspacePath.subtitle,
+  }, "")
+
+  // ── Features ───────────────────────────────────────────────────────────────
+  .field("enableMemory", "boolean", {
+    displayName: c.enableMemory.displayName,
+    subtitle: c.enableMemory.subtitle,
+  }, false)
+  .field("enableWikipediaTool", "boolean", {
+    displayName: c.enableWikipediaTool.displayName,
+    subtitle: c.enableWikipediaTool.subtitle,
+  }, true)
+  .field("enableLocalRag", "boolean", {
+    displayName: c.enableLocalRag.displayName,
+    subtitle: c.enableLocalRag.subtitle,
+  }, true)
+
+  // ── Secondary Agent ────────────────────────────────────────────────────────
+  .field("enableSecondaryAgent", "boolean", {
+    displayName: c.enableSecondaryAgent.displayName,
+    subtitle: c.enableSecondaryAgent.subtitle,
+  }, false)
+  .field("useMainModelForSubAgent", "boolean", {
+    displayName: c.useMainModelForSubAgent.displayName,
+    subtitle: c.useMainModelForSubAgent.subtitle,
+  }, false)
+  .field("secondaryAgentEndpoint", "string", {
+    displayName: c.secondaryAgentEndpoint.displayName,
+    subtitle: c.secondaryAgentEndpoint.subtitle,
+  }, "http://localhost:1234/v1")
+  .field("secondaryModelId", "string", {
+    displayName: c.secondaryModelId.displayName,
+    subtitle: c.secondaryModelId.subtitle,
+  }, "local-model")
+
+  // ── Sub-Agent Configuration ────────────────────────────────────────────────
+  .field("subAgentProfiles", "string", {
+    displayName: c.subAgentProfiles.displayName,
+    subtitle: c.subAgentProfiles.subtitle,
+  }, '{"summarizer": "You are a summarization expert. Summarize the content concisely.", "coder": "You are a software engineer. Write efficient and safe code."}')
+  .field("subAgentFrequency", "string", {
+    displayName: c.subAgentFrequency.displayName,
+    subtitle: c.subAgentFrequency.subtitle,
+  }, "when_useful")
+  .field("subAgentAllowFileSystem", "boolean", {
+    displayName: c.subAgentAllowFileSystem.displayName,
+    subtitle: c.subAgentAllowFileSystem.subtitle,
+  }, true)
+  .field("subAgentAllowWeb", "boolean", {
+    displayName: c.subAgentAllowWeb.displayName,
+    subtitle: c.subAgentAllowWeb.subtitle,
+  }, true)
+  .field("subAgentAllowCode", "boolean", {
+    displayName: c.subAgentAllowCode.displayName,
+    subtitle: c.subAgentAllowCode.subtitle,
+  }, false)
+  .field("subAgentAllowBrowserControl", "boolean", {
+    displayName: c.subAgentAllowBrowserControl.displayName,
+    subtitle: c.subAgentAllowBrowserControl.subtitle,
+  }, false)
+  .field("subAgentTimeLimit", "numeric", {
+    int: true,
+    min: 30,
+    max: 3600,
+    displayName: c.subAgentTimeLimit.displayName,
+    subtitle: c.subAgentTimeLimit.subtitle,
+  }, 600)
+
+  // ── Debug / Output ─────────────────────────────────────────────────────────
+  .field("enableDebugMode", "boolean", {
+    displayName: c.enableDebugMode.displayName,
+    subtitle: c.enableDebugMode.subtitle,
+  }, false)
+  .field("enableSubAgentDebugLogging", "boolean", {
+    displayName: c.enableSubAgentDebugLogging.displayName,
+    subtitle: c.enableSubAgentDebugLogging.subtitle,
+  }, false)
+  .field("subAgentAutoSave", "boolean", {
+    displayName: c.subAgentAutoSave.displayName,
+    subtitle: c.subAgentAutoSave.subtitle,
+  }, true)
+  .field("showFullCodeOutput", "boolean", {
+    displayName: c.showFullCodeOutput.displayName,
+    subtitle: c.showFullCodeOutput.subtitle,
+  }, false)
+  .build();
