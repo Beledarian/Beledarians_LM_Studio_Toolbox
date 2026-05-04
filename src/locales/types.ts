@@ -8,6 +8,7 @@ export interface LocaleDict {
   // ──────────────────────────────────────────────────────────────
   config: {
     messageLanguage: { displayName: string; subtitle: string };
+    uiLanguageOverride: { displayName: string; subtitle: string };
 
     planMode: { displayName: string; subtitle: string };
     retrievalLimit: { displayName: string; subtitle: string };

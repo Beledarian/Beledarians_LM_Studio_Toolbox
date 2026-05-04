@@ -13,6 +13,9 @@ import { en } from "./en";
 import { zhCN } from "./zh-CN";
 import { zhTW } from "./zh-TW";
 import { de } from "./de";
+import { readFileSync } from "fs";
+import { join } from "path";
+import * as os from "os";
 
 // ─────────────────────────────────────────────────────────────
 // Registry
@@ -27,6 +30,32 @@ const LOCALES: Record<string, LocaleDict> = {
 
 /** The canonical locale IDs this plugin exposes to users (Layer 2 dropdown). */
 export const SUPPORTED_LOCALE_IDS = Object.keys(LOCALES) as ReadonlyArray<string>;
+
+// ─────────────────────────────────────────────────────────────
+// Persisted Override (synchronous boot-time read)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Reads the plugin state file synchronously to check for a persisted
+ * `uiLanguageOverride`. This must be synchronous because it is called
+ * during module evaluation, before withConfigSchematics() runs.
+ *
+ * Returns the override locale ID (e.g. "zh-CN") or "auto" / "" if none set.
+ */
+function readPersistedLocaleOverride(): string {
+  try {
+    const statePath = join(os.homedir(), ".beledarians-llm-toolbox", ".plugin_state.json");
+    const raw = readFileSync(statePath, "utf-8");
+    const state = JSON.parse(raw);
+    const override = state?.uiLanguageOverride;
+    if (typeof override === "string" && override && override !== "auto") {
+      return override;
+    }
+  } catch {
+    // File doesn't exist yet or is malformed — fall through to OS detection
+  }
+  return "";
+}
 
 // ─────────────────────────────────────────────────────────────
 // Detection
@@ -134,8 +163,20 @@ export function getDict(locale?: string): LocaleDict {
 /**
  * Convenience: detect + resolve + return the dictionary in one call.
  * Used by config.ts during Layer 1 (static boot-time) initialization.
+ *
+ * Priority:
+ *  1. Persisted `uiLanguageOverride` from state file (set by user in config)
+ *  2. OS locale detection (Intl + POSIX env vars)
  */
 export function getSystemDict(): { dict: LocaleDict; resolvedLocale: string } {
+  // 1. Check for a persisted override written on a previous turn
+  const persistedOverride = readPersistedLocaleOverride();
+  if (persistedOverride) {
+    const resolvedLocale = resolveLocale(persistedOverride);
+    return { dict: getDict(resolvedLocale), resolvedLocale };
+  }
+
+  // 2. Fall back to OS detection
   const raw = detectSystemLanguage();
   const resolvedLocale = resolveLocale(raw);
   return { dict: getDict(resolvedLocale), resolvedLocale };
