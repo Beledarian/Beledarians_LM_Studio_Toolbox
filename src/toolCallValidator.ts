@@ -36,11 +36,11 @@ export function validateToolCall(
     const fileName = args.file_name || args.name || args.path;
     const fileContent = args.content || args.data;
 
-    if (!fileName && content === undefined) {
+    if (!fileName && fileContent === undefined) {
       toolValidationError = `Tool 'save_file' requires parameters: [file_name, content]. Provided keys: ${Object.keys(args).join(", ") || "none"}.`;
     } else if (!fileName) {
       toolValidationError = `Tool 'save_file' missing required parameter: 'file_name'.`;
-    } else if (content === undefined || content === null) {
+    } else if (fileContent === undefined || fileContent === null) {
       toolValidationError = `Tool 'save_file' missing required parameter: 'content'.`;
     } else if (isAbsolute(fileName)) {
       toolValidationError = `Tool 'save_file' rejected absolute path: '${fileName}'. SECURITY: Files can only be saved within workspace. Use relative path like 'test.html'.`;
@@ -67,6 +67,25 @@ export function validateToolCall(
       toolValidationError = `Tool 'replace_text_in_file' missing parameters: [${missing.join(", ")}]. Provided keys: ${Object.keys(args).join(", ") || "none"}.`;
     } else if (isAbsolute(fileName)) {
       toolValidationError = `Tool 'replace_text_in_file' rejected absolute path. SECURITY: Only workspace paths allowed.`;
+    }
+  }
+
+  if (toolName === "multi_replace_text") {
+    const fileName = args.file_name || args.path || args.name;
+    if (!fileName) {
+      toolValidationError = `Tool 'multi_replace_text' missing parameter: 'file_name'.`;
+    } else if (isAbsolute(fileName)) {
+      toolValidationError = `Tool 'multi_replace_text' rejected absolute path. SECURITY: Only workspace paths allowed.`;
+    } else if (!Array.isArray(args.replacements) || args.replacements.length === 0) {
+      toolValidationError = `Tool 'multi_replace_text' requires an array 'replacements' with at least one replacement object.`;
+    } else {
+      for (let i = 0; i < args.replacements.length; i++) {
+        const rep = args.replacements[i];
+        if (!rep.start_line || !rep.end_line || !rep.old_string || typeof rep.new_string !== "string") {
+          toolValidationError = `Tool 'multi_replace_text' replacements[${i}] missing required fields (start_line, end_line, old_string, new_string).`;
+          break;
+        }
+      }
     }
   }
 
