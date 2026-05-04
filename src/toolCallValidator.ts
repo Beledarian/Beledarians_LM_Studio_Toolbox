@@ -70,5 +70,24 @@ export function validateToolCall(
     }
   }
 
+  if (toolName === "multi_replace_text") {
+    const fileName = args.file_name || args.path || args.name;
+    if (!fileName) {
+      toolValidationError = `Tool 'multi_replace_text' missing parameter: 'file_name'.`;
+    } else if (isAbsolute(fileName)) {
+      toolValidationError = `Tool 'multi_replace_text' rejected absolute path. SECURITY: Only workspace paths allowed.`;
+    } else if (!Array.isArray(args.replacements) || args.replacements.length === 0) {
+      toolValidationError = `Tool 'multi_replace_text' requires an array 'replacements' with at least one replacement object.`;
+    } else {
+      for (let i = 0; i < args.replacements.length; i++) {
+        const rep = args.replacements[i];
+        if (!rep.start_line || !rep.end_line || !rep.old_string || typeof rep.new_string !== "string") {
+          toolValidationError = `Tool 'multi_replace_text' replacements[${i}] missing required fields (start_line, end_line, old_string, new_string).`;
+          break;
+        }
+      }
+    }
+  }
+
   return toolValidationError;
 }
