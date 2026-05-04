@@ -158,6 +158,16 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     isWorkspaceInitialized = true;
   }
 
+  // Persist uiLanguageOverride on every plugin load so i18n.ts can read it
+  // synchronously at the next startup — no message required.
+  const uiLanguageOverride = pluginConfig.get("uiLanguageOverride");
+  if (fullState.uiLanguageOverride !== uiLanguageOverride) {
+    fullState.uiLanguageOverride = uiLanguageOverride;
+    await savePersistedState(fullState);
+    console.log(`[i18n] uiLanguageOverride persisted: "${uiLanguageOverride}". Restart plugin to apply.`);
+  }
+
+
   const tools: Tool[] = [];
   let browserSession: { browser: Browser; page: Page; currentUrl: string } | null = null;
 
