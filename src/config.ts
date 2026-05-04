@@ -17,6 +17,12 @@ export const pluginConfigSchematics = createConfigSchematics()
     subtitle: c.messageLanguage.subtitle,
   }, resolvedLocale)
 
+  // ── UI Language Override (persisted; takes effect on next restart) ──────────
+  .field("uiLanguageOverride", "string", {
+    displayName: c.uiLanguageOverride.displayName,
+    subtitle: c.uiLanguageOverride.subtitle,
+  }, "auto")
+
   // ── Planning ───────────────────────────────────────────────────────────────
   .field("planMode", "string", {
     displayName: c.planMode.displayName,

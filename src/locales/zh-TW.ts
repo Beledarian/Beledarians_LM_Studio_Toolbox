@@ -6,6 +6,10 @@ export const zhTW: LocaleDict = {
       displayName: "訊息語言",
       subtitle: "執行時訊息、提示及提示詞注入所使用的語言。變更立即生效，無需重新啟動插件。",
     },
+    uiLanguageOverride: {
+      displayName: "介面語言覆寫（下次重啟生效）",
+      subtitle: "在下次插件重新啟動時強制使用指定地區設定，覆寫作業系統偵測結果。設定為 'auto' 則使用作業系統語言。選項：auto、en、zh-CN、zh-TW、de。",
+    },
     planMode: {
       displayName: "計劃模式",
       subtitle: "控制模型在進行變更之前是否探索並提出計劃。選項：'always'、'when_useful'、'never'。",

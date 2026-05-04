@@ -88,6 +88,19 @@ export async function promptPreprocessor(ctl: PromptPreprocessorController, user
   const messageLanguage = pluginConfig.get("messageLanguage");
   const rt = getDict(messageLanguage).runtime;
 
+  // Persist uiLanguageOverride to state file so i18n.ts can read it synchronously on next boot.
+  const uiLanguageOverride = pluginConfig.get("uiLanguageOverride");
+  try {
+    const state = await getPersistedState(defaultWorkspacePath);
+    if (state.uiLanguageOverride !== uiLanguageOverride) {
+      state.uiLanguageOverride = uiLanguageOverride;
+      await savePersistedState(state);
+      ctl.debug(`[i18n] uiLanguageOverride saved: "${uiLanguageOverride}". Restart the plugin to apply the new UI language.`);
+    }
+  } catch (e) {
+    ctl.debug("[i18n] Failed to persist uiLanguageOverride.", e);
+  }
+
   // --- Plan Mode Instructions ---
   const planMode = pluginConfig.get("planMode");
   
