@@ -14,6 +14,56 @@ import { parseSubAgentResponseMessage, type ParsedToolCall } from "./subAgentToo
 import { validateToolCall } from "./toolCallValidator";
 
 import type { Browser, Page } from "puppeteer";
+import { compile } from "html-to-text";
+
+const compiledConvert = compile({
+  wordwrap: false,
+  formatters: {
+    cleanImage: function (elem, walk, builder, formatOptions) {
+      const altText = elem.attribs?.alt;
+      if (altText && altText.trim().length > 0) {
+        builder.addInline(`[Image: ${altText.trim()}]`);
+      }
+    }
+  },
+  selectors: [
+    { selector: "a", options: { ignoreHref: true } },
+    { selector: "img", format: "cleanImage" },
+    { selector: "style", format: "skip" },
+    { selector: "script", format: "skip" },
+    { selector: "noscript", format: "skip" },
+    { selector: "svg", format: "skip" },
+    { selector: "template", format: "skip" },
+    { selector: "canvas", format: "skip" },
+    { selector: "object", format: "skip" },
+    { selector: "video", format: "skip" },
+    { selector: "audio", format: "skip" },
+    { selector: "nav", format: "skip" },
+    { selector: "frame", format: "skip" },
+    { selector: "iframe", format: "skip" },
+    { selector: "form", format: "skip" },
+    { selector: "input", format: "skip" },
+    { selector: "button", format: "skip" },
+    { selector: "select", format: "skip" },
+    { selector: "aside", format: "skip" },
+  ],
+});
+
+async function fetchAndParseWebpage(url: string) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+  
+  const rawHtml = await response.text();
+  
+  const titleMatch = rawHtml.match(/<title[^>]*>([^<]+)<\/title>/i);
+  const title = titleMatch ? titleMatch[1] : undefined;
+
+  const parsedText = compiledConvert(rawHtml);
+  
+  return { text: parsedText, title, status: response.status };
+}
 
 // --- Security Helper ---
 function validatePath(baseDir: string, requestedPath: string): string {
@@ -1386,51 +1436,11 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     },
     implementation: async ({ url }) => {
       try {
-        const response = await fetch(url);
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        let text = await response.text();
-
-        const result: any = {
-          url,
-          status: response.status,
-        };
-
-        const titleMatch = text.match(/<title[^>]*>([^<]+)<\/title>/i);
-        if (titleMatch) result.title = titleMatch[1];
-
-        const { compile } = await import("html-to-text");
-        const compiledConvert = compile({
-          wordwrap: false,
-              selectors: [
-                { selector: "a", options: { ignoreHref: true } },
-                { selector: "img", format: "skip" },
-                { selector: "style", format: "skip" },
-                { selector: "script", format: "skip" },
-                { selector: "noscript", format: "skip" },
-                { selector: "svg", format: "skip" },
-                { selector: "template", format: "skip" },
-                { selector: "canvas", format: "skip" },
-                { selector: "object", format: "skip" },
-                { selector: "video", format: "skip" },
-                { selector: "audio", format: "skip" },
-                { selector: "nav", format: "skip" },
-                { selector: "frame", format: "skip" },
-                { selector: "iframe", format: "skip" },
-                { selector: "form", format: "skip" },
-                { selector: "input", format: "skip" },
-                { selector: "button", format: "skip" },
-                { selector: "select", format: "skip" },
-                { selector: "aside", format: "skip" },
-              ],
-        });
-
-        text = compiledConvert(text);
-
-        result.content = text.substring(0, 40000) + (text.length > 40000 ? "... (truncated)" : "");
-
-        return result;
+        const { text, title, status } = await fetchAndParseWebpage(url);
+        
+        const content = text.substring(0, 40000) + (text.length > 40000 ? "... (truncated)" : "");
+        
+        return { url, status, title, content };
       } catch (error) {
         return {
           error: `Failed to fetch URL: ${error instanceof Error ? error.message : String(error)}`,
@@ -1449,46 +1459,12 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     },
     implementation: async ({ url, query }) => {
       try {
-        // 1. Fetch content
-        const response = await fetch(url);
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        let text = await response.text();
-
-        const { compile } = await import("html-to-text");
-        const compiledConvert = compile({
-          wordwrap: false,
-              selectors: [
-                { selector: "a", options: { ignoreHref: true } },
-                { selector: "img", format: "skip" },
-                { selector: "style", format: "skip" },
-                { selector: "script", format: "skip" },
-                { selector: "noscript", format: "skip" },
-                { selector: "svg", format: "skip" },
-                { selector: "template", format: "skip" },
-                { selector: "canvas", format: "skip" },
-                { selector: "object", format: "skip" },
-                { selector: "video", format: "skip" },
-                { selector: "audio", format: "skip" },
-                { selector: "nav", format: "skip" },
-                { selector: "frame", format: "skip" },
-                { selector: "iframe", format: "skip" },
-                { selector: "form", format: "skip" },
-                { selector: "input", format: "skip" },
-                { selector: "button", format: "skip" },
-                { selector: "select", format: "skip" },
-                { selector: "aside", format: "skip" },
-              ],
-        });
-
-        text = compiledConvert(text);
+        const { text } = await fetchAndParseWebpage(url);
 
         if (text.length === 0) {
           return { error: "Could not extract any text from the URL." };
         }
 
-        // 3. Perform RAG
         if (!client) {
           return { error: "LM Studio Client is not available. RAG features require the client to be initialized." };
         }
