@@ -103,6 +103,9 @@ function normalizeArgs(toolName: string, args: unknown): Record<string, any> {
     if (typeof fileArgs.path === "string" && fileArgs.file_name === undefined) {
       fileArgs.file_name = fileArgs.path;
     }
+    if (typeof fileArgs.name === "string" && fileArgs.file_name === undefined) {
+      fileArgs.file_name = fileArgs.name;
+    }
     return fileArgs;
   }
 
@@ -110,6 +113,9 @@ function normalizeArgs(toolName: string, args: unknown): Record<string, any> {
     const saveArgs = { ...normalized } as Record<string, unknown>;
     if (typeof saveArgs.path === "string" && saveArgs.file_name === undefined) {
       saveArgs.file_name = saveArgs.path;
+    }
+    if (typeof saveArgs.name === "string" && saveArgs.file_name === undefined) {
+      saveArgs.file_name = saveArgs.name;
     }
     if (typeof saveArgs.data === "string" && saveArgs.content === undefined) {
       saveArgs.content = saveArgs.data;

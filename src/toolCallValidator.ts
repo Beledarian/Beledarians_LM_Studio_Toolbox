@@ -11,7 +11,24 @@ export function validateToolCall(
   let toolValidationError: string | null = null;
 
   if (toolName === "save_file") {
-    const fileName = args.file_name || args.name;
+    if (Array.isArray(args.files)) {
+      for (const file of args.files) {
+        const fileName = file.file_name || file.name || file.path;
+        const fileContent = file.content || file.data;
+        if (!fileName && !fileContent) {
+          return `Tool 'save_file' batch mode requires [file_name, content] in all objects.`;
+        } else if (!fileName) {
+          return `Tool 'save_file' batch missing 'file_name'. Hint: Use 'file_name'.`;
+        } else if (!fileContent) {
+          return `Tool 'save_file' batch missing 'content'. Hint: Use 'content'.`;
+        } else if (isAbsolute(fileName)) {
+          return `Tool 'save_file' batch rejected absolute path: '${fileName}'. SECURITY: Files can only be saved within workspace.`;
+        }
+      }
+      return null;
+    }
+
+    const fileName = args.file_name || args.name || args.path;
     const fileContent = args.content || args.data;
 
     if (!fileName && !fileContent) {
@@ -36,13 +53,14 @@ export function validateToolCall(
   }
 
   if (toolName === "replace_text_in_file") {
+    const fileName = args.file_name || args.path || args.name;
     const missing: string[] = [];
-    if (!args.file_name) missing.push("file_name");
+    if (!fileName) missing.push("file_name");
     if (!args.old_string) missing.push("old_string");
     if (!args.new_string) missing.push("new_string");
     if (missing.length > 0) {
       toolValidationError = `Tool 'replace_text_in_file' missing parameters: [${missing.join(", ")}]. Provided keys: ${Object.keys(args).join(", ") || "none"}.`;
-    } else if (isAbsolute(args.file_name)) {
+    } else if (isAbsolute(fileName)) {
       toolValidationError = `Tool 'replace_text_in_file' rejected absolute path. SECURITY: Only workspace paths allowed.`;
     }
   }

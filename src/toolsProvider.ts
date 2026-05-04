@@ -718,26 +718,54 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
       output this full path to the user.
     `,
     parameters: {
-      file_name: z.string(),
-      content: z.string(),
+      file_name: z.string().optional(),
+      content: z.string().optional(),
+      files: z.array(z.object({ file_name: z.string(), content: z.string() })).optional().describe("For saving multiple files at once. E.g. [{file_name: 'a.txt', content: 'hello'}]"),
     },
-    implementation: async ({ file_name, content }) => {
+    implementation: async ({ file_name, content, files }) => {
+
+      const filesToSave = Array.isArray(files) ? files : [];
+      if (file_name && content) {
+        filesToSave.push({ file_name, content });
+      }
+
+      if (filesToSave.length === 0) {
+        return { error: "Must provide either file_name and content, or a files array." };
+      }
+
+      const savedPaths: string[] = [];
+      const errors: string[] = [];
+
+      for (const file of filesToSave) {
 
       // Validate filename
-      if (!file_name || file_name.trim().length === 0) {
-        return { error: "Filename cannot be empty" };
+      if (!file.file_name || file.file_name.trim().length === 0) {
+        errors.push(`Filename cannot be empty`);
+        continue;
       }
 
       if (/[ \*\?<>|"]/.test(file_name)) {
-        return { error: "Filename contains invalid characters" };
+        errors.push("Filename " + file.file_name + " contains invalid characters");\n        continue;
       }
 
-      const filePath = validatePath(currentWorkingDirectory, file_name);
-      await mkdir(dirname(filePath), { recursive: true });
-      await writeFile(filePath, content, "utf-8");
+        try {
+          const filePath = validatePath(currentWorkingDirectory, file.file_name);
+          await mkdir(dirname(filePath), { recursive: true });
+          await writeFile(filePath, file.content, "utf-8");
+          savedPaths.push(filePath);
+        } catch (e) {
+          errors.push(`Failed to save ${file.file_name}: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+
+      if (errors.length > 0 && savedPaths.length === 0) {
+        return { error: errors.join("\n") };
+      }
+
       return {
         success: true,
-        path: filePath,
+        paths: savedPaths,
+        errors: errors.length > 0 ? errors : undefined,
       };
     },
   });
