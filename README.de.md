@@ -17,6 +17,27 @@ Dieses Projekt ist ein Plugin für [LM Studio](https://lmstudio.ai/), das einem 
 -   **System-Integration**: Zugriff auf das Terminal, Git-Operationen und GitHub-CLI-Tools.
 -   **Multi-Locale Support**: Volle Unterstützung für Deutsch, Englisch und Chinesisch.
 
+## Aktuelle Updates (v1.3.1)
+
+- **🌍 Volle Internationalisierung (i18n):** Komplette Unterstützung für **Deutsch**, **Englisch** und **Chinesisch** in der Benutzeroberfläche und zur Laufzeit.
+- **🌐 Dual-Layer Übersetzung:** Unterstützt sowohl die "Config UI" (statisch) als auch "Agenten-Nachrichten" (dynamisch).
+- **🔄 UI Language Override:** Manuelles Erzwingen der UI-Sprache für den nächsten Plugin-Neustart.
+
+<details>
+<summary><strong>Ältere Updates (v1.3.0 & früher)</strong></summary>
+
+### v1.3.0
+
+- **🐙 Native GitHub CLI Tools:** Unterstützung für `gh_auth`, `gh_create_issue`, `gh_create_pr` usw.
+- **🌿 Erweiterter Git-Workflow:** Native Git-Tools für Add und Checkout.
+- **⚙️ Neuer Sidebar-Schalter:** Separate Aktivierung der GitHub-Tools.
+
+### v1.2.0
+
+- **🛡️ Validierung von Sub-Agenten-Tools:** Frühzeitige Validierung von Parametern zur Vermeidung von Fehlern.
+
+</details>
+
 ## Installation
 
 1. Öffnen Sie **LM Studio**.
