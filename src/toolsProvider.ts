@@ -2281,7 +2281,7 @@ Always assume relative paths are from this directory.`;
             if (allowedTools.length > 0) {
               const toolsList = allowedTools.join(", ");
               currentSystemPrompt += `\n\n## Allowed Tools\nYou have access to the following tools via JSON output: ${toolsList}.\nRefer to the "Tool Usage" section above for the JSON format.\n`;
-              toolsReminder = `\n\n[SYSTEM REMINDER: You have access to tools: ${toolsList}. If you need information you don't have, USE A TOOL. Do not refuse.]`;
+              toolsReminder = `\n\n[SYSTEM REMINDER: You have access to tools: ${toolsList}. If you need information you don't have, USE A TOOL. Do not refuse. Format tool calls exactly as: {"tool": "tool_name", "args": {"arg_name": "value"}}]`;
             }
             if (allowWeb && allowSubAgentBrowserControl && allowBrowserControl) {
               currentSystemPrompt += `\n\n## Browser Navigation Rule\nFor multi-step browsing/navigation, you MUST use browser_session_open -> browser_session_control -> browser_session_close.\nUse browser_open_page only for one-shot page reads.`;
@@ -2336,6 +2336,8 @@ Always assume relative paths are from this directory.`;
               let toolCall: ParsedToolCall | null = parsedMessage.toolCall;
 
               if (subAgentDebugLogging) {
+                const rawContent = (typeof message === "string" ? message : JSON.stringify(message)) ?? "";
+                console.log(`[Sub-Agent] RAW content received: ${rawContent.substring(0, 1000)}...`);
                 const preview = content.substring(0, 200);
                 console.log(`[Sub-Agent] Parse result source=${parsedMessage.toolCallSource} hasToolCall=${Boolean(toolCall)} preview=${preview}`);
               }

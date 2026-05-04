@@ -26,9 +26,10 @@ export function validateToolCall(
   }
 
   if (toolName === "read_file") {
-    const fileName = args.file_name;
+    // Accept file_name, path, or name for consistency with parser normalization
+    const fileName = args.file_name || args.path || args.name;
     if (!fileName) {
-      toolValidationError = `Tool 'read_file' requires parameter: [file_name]. Provided keys: ${Object.keys(args).join(", ") || "none"}.`;
+      toolValidationError = `Tool 'read_file' requires parameter: [file_name]. Provided keys: ${Object.keys(args).join(", ") || "none"}. Hint: Use 'file_name' (not 'path', 'filepath', or 'file_path').`;
     } else if (isAbsolute(fileName)) {
       toolValidationError = `Tool 'read_file' rejected absolute path. SECURITY: Only workspace paths allowed.`;
     }
