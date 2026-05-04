@@ -10,6 +10,8 @@ export interface PluginState {
   messageCount: number;
   dontAskToCompress: boolean;
   subAgentDocsInjected: boolean;
+  /** Locale ID to use for Layer 1 (Config UI) on next plugin restart. "auto" = OS detection. */
+  uiLanguageOverride: string;
 }
 
 function resolveWorkspaceDirectory(configuredWorkspacePath?: string): string {
@@ -34,6 +36,7 @@ export async function getPersistedState(configuredWorkspacePath?: string): Promi
       messageCount: state.messageCount ?? 0,
       dontAskToCompress: state.dontAskToCompress ?? false,
       subAgentDocsInjected: state.subAgentDocsInjected ?? false,
+      uiLanguageOverride: state.uiLanguageOverride ?? "auto",
     };
   } catch (error) {
     return {
@@ -41,6 +44,7 @@ export async function getPersistedState(configuredWorkspacePath?: string): Promi
       messageCount: 0,
       dontAskToCompress: false,
       subAgentDocsInjected: false,
+      uiLanguageOverride: "auto",
     };
   }
 }

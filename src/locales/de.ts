@@ -6,6 +6,10 @@ export const de: LocaleDict = {
       displayName: "Nachrichtensprache",
       subtitle: "Sprache für Laufzeitmeldungen, Hinweise und Prompt-Injektionen. Änderungen gelten sofort ohne Neustart.",
     },
+    uiLanguageOverride: {
+      displayName: "UI-Sprache überschreiben (beim nächsten Neustart)",
+      subtitle: "Erzwingt beim nächsten Plugin-Neustart eine bestimmte Sprache für die Oberfläche, überschreibt die OS-Erkennung. 'auto' verwendet die OS-Sprache. Optionen: auto, en, zh-CN, zh-TW, de.",
+    },
     planMode: {
       displayName: "Planungsmodus",
       subtitle: "Legt fest, wann das Modell vor Änderungen einen Plan erkunden und vorschlagen soll. Optionen: 'always', 'when_useful', 'never'.",

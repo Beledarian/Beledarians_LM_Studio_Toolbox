@@ -7,6 +7,11 @@ export const en: LocaleDict = {
       subtitle:
         "Language used for runtime messages, hints, and prompt injections. Changes take effect immediately without restart.",
     },
+    uiLanguageOverride: {
+      displayName: "UI Language Override (Next Restart)",
+      subtitle:
+        "Force the Config UI to a specific locale on the next plugin restart, overriding OS detection. Set to 'auto' to use OS detection. Options: auto, en, zh-CN, zh-TW, de.",
+    },
 
     planMode: {
       displayName: "Plan Mode",

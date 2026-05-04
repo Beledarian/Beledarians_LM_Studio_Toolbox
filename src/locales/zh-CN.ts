@@ -6,6 +6,10 @@ export const zhCN: LocaleDict = {
       displayName: "消息语言",
       subtitle: "运行时消息、提示和提示词注入所使用的语言。更改立即生效，无需重启插件。",
     },
+    uiLanguageOverride: {
+      displayName: "界面语言覆盖（下次重启生效）",
+      subtitle: "在下次插件重启时强制使用指定区域设置，覆盖操作系统检测。设置为 'auto' 则使用操作系统语言。选项：auto、en、zh-CN、zh-TW、de。",
+    },
     planMode: {
       displayName: "计划模式",
       subtitle: "控制模型在进行更改之前是否探索并提出计划。选项：'always'、'when_useful'、'never'。",
