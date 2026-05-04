@@ -1336,10 +1336,27 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         const { compile } = await import("html-to-text");
         const compiledConvert = compile({
           wordwrap: false,
-          selectors: [
-            { selector: "a", options: { ignoreHref: true } },
-            { selector: "img", format: "skip" },
-          ],
+              selectors: [
+                { selector: "a", options: { ignoreHref: true } },
+                { selector: "img", format: "skip" },
+                { selector: "style", format: "skip" },
+                { selector: "script", format: "skip" },
+                { selector: "noscript", format: "skip" },
+                { selector: "svg", format: "skip" },
+                { selector: "template", format: "skip" },
+                { selector: "canvas", format: "skip" },
+                { selector: "object", format: "skip" },
+                { selector: "video", format: "skip" },
+                { selector: "audio", format: "skip" },
+                { selector: "nav", format: "skip" },
+                { selector: "frame", format: "skip" },
+                { selector: "iframe", format: "skip" },
+                { selector: "form", format: "skip" },
+                { selector: "input", format: "skip" },
+                { selector: "button", format: "skip" },
+                { selector: "select", format: "skip" },
+                { selector: "aside", format: "skip" },
+              ],
         });
 
         text = compiledConvert(text);
@@ -1375,10 +1392,27 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         const { compile } = await import("html-to-text");
         const compiledConvert = compile({
           wordwrap: false,
-          selectors: [
-            { selector: "a", options: { ignoreHref: true } },
-            { selector: "img", format: "skip" },
-          ],
+              selectors: [
+                { selector: "a", options: { ignoreHref: true } },
+                { selector: "img", format: "skip" },
+                { selector: "style", format: "skip" },
+                { selector: "script", format: "skip" },
+                { selector: "noscript", format: "skip" },
+                { selector: "svg", format: "skip" },
+                { selector: "template", format: "skip" },
+                { selector: "canvas", format: "skip" },
+                { selector: "object", format: "skip" },
+                { selector: "video", format: "skip" },
+                { selector: "audio", format: "skip" },
+                { selector: "nav", format: "skip" },
+                { selector: "frame", format: "skip" },
+                { selector: "iframe", format: "skip" },
+                { selector: "form", format: "skip" },
+                { selector: "input", format: "skip" },
+                { selector: "button", format: "skip" },
+                { selector: "select", format: "skip" },
+                { selector: "aside", format: "skip" },
+              ],
         });
 
         text = compiledConvert(text);
