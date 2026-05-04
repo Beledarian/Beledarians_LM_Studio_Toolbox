@@ -28,15 +28,15 @@ This project is a plugin for [LM Studio](https://lmstudio.ai/) that provides a r
 - **🌐 Dual-Layer Translation:** Supports both "Config UI" (static) and "Agent Messages" (dynamic runtime) languages.
 - **🔄 UI Language Override:** Added a field to manually force the Config UI into a specific locale for testing, bypassing OS-level detection on the next plugin restart.
 
-### Recent Updates (v1.3.0)
+<details>
+<summary><strong>Older Updates (v1.3.0 & earlier)</strong></summary>
+
+### v1.3.0
 
 - **🐙 Native GitHub CLI Tools:** Added `gh_auth`, `gh_create_issue`, `gh_list_issues`, `gh_view_comments`, `gh_create_pr`, `gh_list_prs`, `gh_view_pr_diff`, and `gh_push` for secure, structured GitHub interactions without generic shell commands
 - **🌿 Enhanced Git Workflow:** Added `git_add` and `git_checkout` tools to complete the native git toolchain (status, diff, log, commit, add, checkout)
 - **⚙️ New Sidebar Toggle:** Added "Allow GitHub CLI Tools" setting to enable/disable `gh_*` tools independently
 - **🛡️ Dependency Guards:** All CLI tools now verify installation before execution and provide clear prompts if missing
-
-<details>
-<summary><strong>Older Updates (v1.2.x & earlier)</strong></summary>
 
 ### v1.2.0
 
