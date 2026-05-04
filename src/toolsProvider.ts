@@ -3,6 +3,7 @@ import { spawn } from "child_process";
 import { rm, writeFile, readdir, readFile, stat, mkdir, rename, copyFile, appendFile } from "fs/promises";
 import * as os from "os";
 import { join, resolve, dirname, isAbsolute, relative } from "path";
+import { randomBytes } from "crypto";
 import { z } from "zod";
 import { pluginConfigSchematics } from "./config";
 import { findLMStudioHome } from "./findLMStudioHome";
@@ -137,6 +138,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
   const enableWikipedia = pluginConfig.get("enableWikipediaTool");
   const enableLocalRag = pluginConfig.get("enableLocalRag");
   const enableSecondary = pluginConfig.get("enableSecondaryAgent");
+  const subAgentTimeLimit = pluginConfig.get("subAgentTimeLimit");
   const embeddingModelName = pluginConfig.get("embeddingModel");
   // const searchApiKey = pluginConfig.get("searchApiKey"); // Used inside tool
 
@@ -306,6 +308,56 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
       },
     });
     tools.push(gitCheckoutTool);
+
+    const gitShowTool = tool({
+      name: "git_show",
+      description: "Show details of a specific git commit including message, author, date, and changes.",
+      parameters: {
+        commit_hash: z.string().optional().describe("The commit hash/reference to show. Defaults to HEAD if omitted."),
+        stat_only: z.boolean().optional().default(false).describe("If true, only show file stats without the full diff."),
+      },
+      implementation: async ({ commit_hash, stat_only = false }) => {
+        const { simpleGit } = await import("simple-git");
+        const git = simpleGit(currentWorkingDirectory);
+        try {
+          const ref = commit_hash || "HEAD";
+          let result;
+          if (stat_only) {
+            // Use git show --stat to get file change statistics without full diff
+            result = await git.raw(["show", "--stat", ref]);
+          } else {
+            result = await git.show([ref]);
+          }
+          return { success: true, output: result };
+        } catch (e) {
+          return { error: `Git show failed: ${e instanceof Error ? e.message : String(e)}` };
+        }
+      },
+    });
+    tools.push(gitShowTool);
+
+    const gitPushTool = tool({
+      name: "git_push",
+      description: "Push local commits to the remote repository.",
+      parameters: {
+        branch: z.string().optional().describe("Optional: The branch to push. Defaults to current branch."),
+      },
+      implementation: async ({ branch }) => {
+        const { simpleGit } = await import("simple-git");
+        const git = simpleGit(currentWorkingDirectory);
+        try {
+          if (branch) {
+            await git.push("origin", branch);
+          } else {
+            await git.push();
+          }
+          return { success: true, message: "Pushed successfully." };
+        } catch (e) {
+          return { error: `Git push failed: ${e instanceof Error ? e.message : String(e)}` };
+        }
+      },
+    });
+    tools.push(gitPushTool);
 
   }
 
@@ -2223,7 +2275,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           role: string,
           taskPrompt: string,
           contextData: string,
-          loopLimit: number = 8,
+          loopLimit: number = 1000, // Effectively unlimited; timeout is the primary termination mechanism
           forceTools: boolean = false,
           currentWorkingDirectory: string
         ) => {
@@ -2273,10 +2325,21 @@ Always assume relative paths are from this directory.`;
           const toolsEnabled = allow_tools || forceTools;
           if (toolsEnabled) {
             const allowedTools = [];
-            if (allowFileSystem) allowedTools.push("read_file", "list_directory", "save_file", "replace_text_in_file", "delete_files_by_pattern", "rag_local_files", "fuzzy_find_local_files", "search_file_content");
+            if (allowFileSystem) {
+              // Core file operations
+              allowedTools.push("read_file", "list_directory", "save_file", "replace_text_in_file");
+              // Enhanced file editing
+              allowedTools.push("read_file_range", "insert_at_line", "append_file", "delete_lines_in_file");
+              // File search and discovery
+              allowedTools.push("find_files", "fuzzy_find_local_files", "search_file_content", "search_in_file");
+              // File management
+              allowedTools.push("delete_files_by_pattern", "rag_local_files");
+            }
             if (allowWeb) allowedTools.push("wikipedia_search", "web_search", "duckduckgo_search", "fetch_web_content", "rag_web_content");
             if (allowWeb && allowSubAgentBrowserControl && allowBrowserControl) allowedTools.push("browser_session_open", "browser_session_control", "browser_session_close");
             if (allowCode) allowedTools.push("run_python", "run_javascript");
+            // finish_task is always available for termination
+            allowedTools.push("finish_task");
 
             if (allowedTools.length > 0) {
               const toolsList = allowedTools.join(", ");
@@ -2288,7 +2351,7 @@ Always assume relative paths are from this directory.`;
             }
           }
 
-          currentSystemPrompt += `\n\n## Optional Handoff Message\nIf you want the main agent to relay your findings, include either:\n1) [HANDOFF_MESSAGE]...[/HANDOFF_MESSAGE]\nOR\n2) JSON with a \`handoff_message\` field (optionally with \`response\` or \`final_response\`).`;
+          currentSystemPrompt += `\n\n## Task Completion & Response Structure\nWhen you have completed the task or gathered all necessary information, you MUST call the 'finish_task' tool to terminate.\nDo NOT output 'TASK_COMPLETED' as text. Instead, use:\n{"tool": "finish_task", "args": {"message": "Your final response/summary here...", "status": "success"}}\n\nIf an error occurs that prevents completion, use status: "error" and explain why in the message.\n\n## Optional Handoff Message\nIf you want the main agent to relay your findings, include either:\n1) [HANDOFF_MESSAGE]...[/HANDOFF_MESSAGE]\nOR\n2) JSON with a \`handoff_message\` field (optionally with \`response\` or \`final_response\`).`;
 
           const msgList = [
             { role: "system", content: currentSystemPrompt },
@@ -2305,19 +2368,99 @@ Always assume relative paths are from this directory.`;
           const suggestedReadPath = allowFileSystem
             ? extractLikelyFilePath(`${taskPrompt}\n${contextData}`)
             : null;
+          const startTime = Date.now();
+          const timeoutMs = subAgentTimeLimit * 1000;
+          // --- Diagnostic Logging Start ---
+          if (subAgentDebugLogging) {
+            console.log(`[Sub-Agent] Starting agent loop`);
+            console.log(`[Sub-Agent] Model: ${modelId}`);
+            console.log(`[Sub-Agent] Endpoint: ${endpoint}`);
+            console.log(`[Sub-Agent] Tools enabled: ${toolsEnabled}, Role: ${role}`);
+            console.log(`[Sub-Agent] Time limit: ${subAgentTimeLimit}s`);
+          }
+
+
+          // --- Stateful Chat Support with Session Isolation ---
+          let previousResponseId: string | null = null;
+          const baseUrl = endpoint.replace(/\/v1$/, '');
+          const statefulEndpoint = `${baseUrl}/api/v1/chat`;
+          let useStatefulChat = true;
+
+          // Generate unique session ID for this sub-agent invocation to prevent cross-contamination
+          const sessionId = `subagent_${Date.now()}_${randomBytes(8).toString("hex")}`;
 
           while (loops < loopLimit) {
             try {
-              const response = await fetch(`${endpoint}/chat/completions`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
+
+              // Build request body - different for first vs subsequent iterations
+              let requestBody: any;
+
+              if (!previousResponseId) {
+                // First iteration - send full system prompt + task with fresh session
+                requestBody = {
                   model: modelId,
-                  messages: msgList,
-                  temperature: 0.7,
-                  stream: false
-                })
-              });
+                  input: `${currentSystemPrompt}\n\nTask: ${taskPrompt}\n\nContext: ${contextData}${toolsReminder}`,
+                  temperature: 0.7
+                };
+              } else {
+                // Subsequent iterations - just send tool output or reminder
+                const latestMsg = msgList[msgList.length - 1];
+                requestBody = {
+                  model: modelId,
+                  input: latestMsg?.content || "",
+                  previous_response_id: previousResponseId,
+                  temperature: 0.7
+                };
+              }
+
+              let response: Response;
+              try {
+                if (useStatefulChat) {
+                  response = await fetch(statefulEndpoint, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(requestBody)
+                  });
+
+                  // If stateful endpoint returns 404, switch to fallback permanently
+                  if (response.status === 404) {
+                    useStatefulChat = false;
+                    previousResponseId = null; // Reset to start fresh with fallback
+                    if (subAgentDebugLogging) {
+                      console.log(`[Sub-Agent] Stateful chat endpoint not available, falling back to /chat/completions`);
+                    }
+                    continue; // Retry with fallback endpoint
+                  }
+                } else {
+                  response = await fetch(`${endpoint}/chat/completions`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      model: modelId,
+                      messages: msgList,
+                      temperature: 0.7,
+                      stream: false
+                    })
+                  });
+                }
+              } catch (fetchError) {
+                // Fallback to OpenAI-compatible endpoint if stateful fails
+                if (useStatefulChat && subAgentDebugLogging) {
+                  console.log(`[Sub-Agent] Stateful chat failed, falling back to /chat/completions`);
+                }
+                useStatefulChat = false;
+
+                response = await fetch(`${endpoint}/chat/completions`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    model: modelId,
+                    messages: msgList,
+                    temperature: 0.7,
+                    stream: false
+                  })
+                });
+              }
 
               if (!response.ok) {
                 const errorBody = await response.text().catch(() => "");
@@ -2325,19 +2468,106 @@ Always assume relative paths are from this directory.`;
                 if (subAgentDebugLogging) {
                   console.log(`[Sub-Agent] API error status=${response.status} body=${compactErrorBody}`);
                 }
-                const details = compactErrorBody ? ` - ${compactErrorBody}` : "";
-                return { error: `API Error: ${response.status}${details}`, filesModified };
+
+                // If it's a 400/422 template error and we have message history, try to recover by trimming context
+                if ((response.status === 400 || response.status === 422) && msgList.length > 3) {
+                  if (subAgentDebugLogging) {
+                    console.log(`[Sub-Agent] Template error detected, attempting recovery by trimming message history...`);
+                  }
+                  // Keep system prompt + original user task + last few exchanges to reduce context and fix template issues
+                  // CRITICAL: LM Studio's Jinja template requires a proper "user" message with an actual query.
+                  // After many tool call/response cycles, all "user" messages become just "Tool Output: ..." which breaks the template.
+                  const systemMsg = msgList[0];
+                  const userTaskMsg = msgList[1]; // The original task prompt - MUST be preserved!
+                  const recentMsgs = msgList.slice(-4); // Keep last 2 tool call/response pairs
+                  msgList.length = 0;
+                  msgList.push(systemMsg, userTaskMsg, ...recentMsgs);
+
+                  // Retry the request with trimmed context that includes a proper user message
+                  response = await fetch(`${endpoint}/chat/completions`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      model: modelId,
+                      messages: msgList,
+                      temperature: 0.7,
+                      stream: false
+                    })
+                  });
+
+                  // If retry still fails, try one more aggressive trim with a synthetic user reminder
+                  if (!response.ok) {
+                    if (subAgentDebugLogging) {
+                      console.log(`[Sub-Agent] First recovery failed, trying with synthetic user reminder...`);
+                    }
+                    msgList.length = 0;
+                    msgList.push(
+                      systemMsg,
+                      { role: "user", content: `Continue working on the task. Recent tool output:\n${recentMsgs[recentMsgs.length - 1]?.content || "Proceed with the task."}` }
+                    );
+
+                    response = await fetch(`${endpoint}/chat/completions`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        model: modelId,
+                        messages: msgList,
+                        temperature: 0.7,
+                        stream: false
+                      })
+                    });
+
+                    // If this also fails, then give up
+                    if (!response.ok) {
+                      const retryError = await response.text().catch(() => "");
+                      const details = retryError.replace(/\s+/g, " ").trim().substring(0, 600);
+                      return { error: `API Error after recovery attempt: ${response.status} - ${details}`, filesModified };
+                    }
+                  }
+                } else {
+                  // Non-recoverable error or first attempt
+                  const details = compactErrorBody ? ` - ${compactErrorBody}` : "";
+                  return { error: `API Error: ${response.status}${details}`, filesModified };
+                }
               }
 
               const data = await response.json();
-              const message = data?.choices?.[0]?.message;
-              const parsedMessage = parseSubAgentResponseMessage(message);
+
+              // Parse response - handle both stateful and OpenAI-compatible formats
+              let messageContent: string;
+              if (useStatefulChat && previousResponseId !== null) {
+                // Stateful API returns {output: [{type: "message", content: "..."}], response_id: "..."}
+                if (data.response_id) {
+                  previousResponseId = data.response_id;
+                }
+
+                if (data.output && Array.isArray(data.output)) {
+                  messageContent = "";
+                  for (const item of data.output) {
+                    if (item.type === "message" && item.content) {
+                      messageContent += item.content;
+                    }
+                  }
+                } else if (data.message?.content) {
+                  // Fallback format
+                  messageContent = data.message.content;
+                } else {
+                  messageContent = "";
+                }
+              } else {
+                // OpenAI-compatible format
+                const message = data?.choices?.[0]?.message;
+                messageContent = typeof message === "string" ? message : (message?.content || "");
+              }
+
+              const parsedMessage = parseSubAgentResponseMessage({ role: "assistant", content: messageContent });
               const content = parsedMessage.content;
               let toolCall: ParsedToolCall | null = parsedMessage.toolCall;
 
+
               if (subAgentDebugLogging) {
                 const preview = content.substring(0, 200);
-                console.log(`[Sub-Agent] Parse result source=${parsedMessage.toolCallSource} hasToolCall=${Boolean(toolCall)} preview=${preview}`);
+                console.log(`[Sub-Agent] Iteration ${loops + 1}: toolCall=${Boolean(toolCall)}, source=${parsedMessage.toolCallSource}, noToolCalls=${noToolCallCount}, preview=${preview}`);
               }
 
               // Always capture the latest content as the finalContent candidate
@@ -2358,6 +2588,29 @@ Always assume relative paths are from this directory.`;
               }
 
               const trimmed = content.trim();
+
+               // --- Prose-Only Response Fallback (after 3 consecutive no-tool-call responses) ---
+               if (!toolCall && noToolCallCount >= 2 && trimmed.length > 0) {
+                 const completionKeywords = [
+                   "done", "completed", "finished", "all done", "task complete",
+                   "i have completed", "successfully created", "here is the summary",
+                   "no further action", "nothing more to do", "task finished"
+                 ];
+
+                 const hasCompletionLanguage = completionKeywords.some(keyword =>
+                   trimmed.toLowerCase().includes(keyword)
+                 );
+
+                 if (hasCompletionLanguage) {
+                   if (subAgentDebugLogging) {
+                     console.log(`[Sub-Agent] Detected completion language after ${noToolCallCount + 1} prose-only responses. Auto-extracting final response.`);
+                   }
+
+                   // Extract as final response instead of waiting for timeout
+                   finalContent = trimmed;
+                   break; // Exit loop with this content
+                 }
+               }
               if (!toolCall && trimmed) {
                 const refusalKeywords = [
                   "i cannot browse", "i don't have access", "i can't access",
@@ -2392,9 +2645,56 @@ Always assume relative paths are from this directory.`;
                 try {
                   // --- Early Parameter Validation (catches wrong param names + absolute paths) ---
                   const args = toolCall.args || {};
+                   
+                   // --- Parameter Name Normalization BEFORE Validation (handle common model mistakes) ---
+                   const normalizedArgs = { ...args };
+                   
+                   // fuzzy_find_local_files: pattern -> query
+                   if (toolCall.tool === "fuzzy_find_local_files" && !normalizedArgs.query && normalizedArgs.pattern) {
+                     normalizedArgs.query = normalizedArgs.pattern;
+                   }
+                   
+                   // run_python/run_javascript: code -> python/javascript  
+                   if ((toolCall.tool === "run_python" || toolCall.tool === "run_javascript") && 
+                       !normalizedArgs.python && !normalizedArgs.javascript && 
+                       normalizedArgs.code) {
+                     if (toolCall.tool === "run_python") {
+                       normalizedArgs.python = normalizedArgs.code;
+                     } else {
+                       normalizedArgs.javascript = normalizedArgs.code;
+                     }
+                   }
+                   
+                   // search_file_content/search_in_file: query -> pattern, path -> file_name
+                   if ((toolCall.tool === "search_file_content" || toolCall.tool === "search_in_file")) {
+                     if (!normalizedArgs.pattern && normalizedArgs.query) {
+                       normalizedArgs.pattern = normalizedArgs.query;
+                     }
+                     if (!normalizedArgs.file_name && normalizedArgs.path) {
+                       normalizedArgs.file_name = normalizedArgs.path;
+                     }
+                   }
+                   
+                   // read_file/save_file: path -> file_name, data -> content
+                   if (toolCall.tool === "read_file" || toolCall.tool === "save_file") {
+                     if (!normalizedArgs.file_name && normalizedArgs.path) {
+                       normalizedArgs.file_name = normalizedArgs.path;
+                     }
+                      // Also handle "file_path" (common model variation/hallucination)
+                      if (!normalizedArgs.file_name && normalizedArgs.file_path) {
+                        normalizedArgs.file_name = normalizedArgs.file_path;
+                      }
+
+                     if (toolCall.tool === "save_file" && !normalizedArgs.content && normalizedArgs.data) {
+                       normalizedArgs.content = normalizedArgs.data;
+                     }
+                   }
+                   
+                   // Update toolCall.args with normalized values so validation and execution use them
+                   toolCall.args = normalizedArgs;
                   
                   // Use shared validator to prevent duplication between prod and tests
-                  toolValidationError = validateToolCall(toolCall.tool, args);
+                  toolValidationError = validateToolCall(toolCall.tool, normalizedArgs);
                   
                   // If validation failed, return error immediately so subagent can retry
                   if (toolValidationError) {
@@ -2410,7 +2710,10 @@ Always assume relative paths are from this directory.`;
                         ? `${readContent.substring(0, maxSubAgentToolOutputChars)}\n... (truncated ${readContent.length - maxSubAgentToolOutputChars} chars)`
                         : readContent;
                     } else if (toolCall.tool === "list_directory") {
-                      const files = await readdir(currentWorkingDirectory);
+                      const targetPath = toolCall.args?.path 
+                        ? validatePath(currentWorkingDirectory, toolCall.args.path) 
+                        : currentWorkingDirectory;
+                      const files = await readdir(targetPath);
                       toolResult = JSON.stringify(files);
                     } else if (toolCall.tool === "save_file") {
                       // Handle batch files (some models return { files: [...] })
@@ -2435,18 +2738,20 @@ Always assume relative paths are from this directory.`;
                           ? `Success: Saved ${savedList.length} files: ${savedList.join(", ")}`
                           : "Error: No valid files found in batch.";
                       } else {
-                        // Handle varying argument names (some models use name/data instead of file_name/content)
-                        const fileName = toolCall.args?.file_name || toolCall.args?.name || toolCall.args?.path;
-                        const content = toolCall.args?.content || toolCall.args?.data;
+                        const fileName = toolCall.args?.file_name;
+                        const content = toolCall.args?.content;
 
-                        if (fileName && content) {
+                        if (fileName && (typeof content === "string")) {
                           const fpath = validatePath(currentWorkingDirectory, fileName);
                           await mkdir(dirname(fpath), { recursive: true });
                           await writeFile(fpath, content, "utf-8");
-                          toolResult = `Success: File saved to ${fpath}`;
+                          toolResult = `Success: File saved to ${fileName}`;
                           filesModified.push(fileName);
                         } else {
-                          toolResult = "Error: Missing 'file_name' (or 'name', 'path') or 'content' (or 'data') arguments.";
+                          const missing = [];
+                          if (!fileName) missing.push("file_name");
+                          if (typeof content !== "string") missing.push("content");
+                          toolResult = `Error: Missing required arguments for save_file: [${missing.join(", ")}].`;
                         }
                       }
                     } else if (toolCall.tool === "replace_text_in_file" && toolCall.args?.file_name && toolCall.args?.old_string && toolCall.args?.new_string) {
@@ -2495,6 +2800,251 @@ Always assume relative paths are from this directory.`;
                         .map(entry => relative(targetDir, join(entry.path, entry.name)).replace(/\\/g, "/"));
                       const ranked = rankFuzzyMatches(toolCall.args.query, files, maxResults);
                       toolResult = JSON.stringify(ranked.map(item => ({ path: item.value, score: item.score })));
+                    } else if (toolCall.tool === "search_file_content" || toolCall.tool === "search_in_file") {
+                      // Search for pattern in file content (grep-like functionality)
+                      const fileName = toolCall.args?.file_name || toolCall.args?.path;
+                      const pattern = toolCall.args?.pattern || toolCall.args?.query;
+                      if (!fileName || !pattern) {
+                        toolResult = "Error: 'search_file_content' requires parameters: [file_name, pattern].";
+                      } else {
+                        try {
+                          const fpath = validatePath(currentWorkingDirectory, fileName);
+                          const content = await readFile(fpath, "utf-8");
+                          const lines = content.split("\n");
+                          const matches: Array<{ line_number: number; content: string }> = [];
+                          
+                          for (let i = 0; i < lines.length && matches.length < 100; i++) {
+                            let lineToSearch = lines[i];
+                            let patternToMatch = pattern;
+                            
+                            // Case-insensitive by default unless specified
+                            const caseSensitive = toolCall.args?.case_sensitive !== undefined 
+                              ? toolCall.args.case_sensitive 
+                              : false;
+                              
+                            if (!caseSensitive) {
+                              lineToSearch = lineToSearch.toLowerCase();
+                              patternToMatch = patternToMatch.toLowerCase();
+                            }
+                            
+                            // Support regex or literal search
+                            const useRegex = toolCall.args?.use_regex || false;
+                            let isMatch = false;
+                            
+                            if (useRegex) {
+                              try {
+                                const regex = new RegExp(patternToMatch);
+                                isMatch = regex.test(lineToSearch);
+                              } catch (e: any) {
+                                return { error: `Invalid regex pattern: ${e.message}`, filesModified };
+                              }
+                            } else {
+                              isMatch = lineToSearch.includes(patternToMatch);
+                            }
+                            
+                            if (isMatch) {
+                              matches.push({
+                                line_number: i + 1,
+                                content: lines[i],
+                              });
+                            }
+                          }
+                          
+                          toolResult = JSON.stringify({
+                            file_name: fileName,
+                            pattern: pattern,
+                            match_count: matches.length,
+                            matches: matches.slice(0, 50), // Limit to first 50 matches
+                          });
+                        } catch (e: any) {
+                          toolResult = `Error searching file: ${e.message}`;
+                        }
+                      }
+                    } else if (toolCall.tool === "read_file_range") {
+                      // Read specific lines from a file with line numbers
+                      const fileName = toolCall.args?.file_name;
+                      const startLine = toolCall.args?.start_line;
+                      const endLine = toolCall.args?.end_line;
+                      
+                      if (!fileName || !startLine || !endLine) {
+                        toolResult = "Error: 'read_file_range' requires parameters: [file_name, start_line, end_line].";
+                      } else {
+                        try {
+                          const fpath = validatePath(currentWorkingDirectory, fileName);
+                          const content = await readFile(fpath, "utf-8");
+                          const lines = content.split("\n");
+                          
+                          if (startLine > lines.length) {
+                            toolResult = `Error: Start line ${startLine} is beyond the end of the file (${lines.length} lines).`;
+                          } else {
+                            const actualEndLine = Math.min(endLine, lines.length);
+                            const selectedLines = lines.slice(startLine - 1, actualEndLine);
+                            
+                            const numberedContent = selectedLines.map((line, idx) => 
+                              `${startLine + idx}: ${line}`
+                            ).join("\n");
+                            
+                            toolResult = JSON.stringify({
+                              file_name: fileName,
+                              start_line: startLine,
+                              end_line: actualEndLine,
+                              line_count: selectedLines.length,
+                              content_with_line_numbers: numberedContent,
+                            });
+                          }
+                        } catch (e: any) {
+                          toolResult = `Error reading file range: ${e.message}`;
+                        }
+                      }
+                    } else if (toolCall.tool === "find_files") {
+                      // Find files recursively matching a pattern
+                      const pattern = toolCall.args?.pattern;
+                      const maxDepth = toolCall.args?.max_depth ?? 5;
+                      
+                      if (!pattern) {
+                        toolResult = "Error: 'find_files' requires parameter: [pattern].";
+                      } else {
+                        try {
+                          const foundFiles: string[] = [];
+                          const lowerPattern = pattern.toLowerCase();
+                          
+                          async function scan(dir: string, currentDepth: number) {
+                            if (currentDepth > maxDepth) return;
+                            try {
+                              const entries = await readdir(dir, { withFileTypes: true });
+                              for (const entry of entries) {
+                                // Skip common directories that shouldn't be searched
+                                if (['node_modules', '.git', 'dist', '.lmstudio'].includes(entry.name)) continue;
+                                
+                                const fullPath = join(dir, entry.name);
+                                if (entry.isDirectory()) {
+                                  await scan(fullPath, currentDepth + 1);
+                                } else if (entry.isFile()) {
+                                  if (entry.name.toLowerCase().includes(lowerPattern)) {
+                                    foundFiles.push(relative(currentWorkingDirectory, fullPath).replace(/\\/g, "/"));
+                                  }
+                                }
+                              }
+                            } catch (e) {
+                              // Ignore access errors
+                            }
+                          }
+                          
+                          await scan(currentWorkingDirectory, 0);
+                          toolResult = JSON.stringify({
+                            found_files: foundFiles.slice(0, 100), // Limit results
+                            count: foundFiles.length,
+                          });
+                        } catch (e: any) {
+                          toolResult = `Error searching for files: ${e.message}`;
+                        }
+                      }
+                    } else if (toolCall.tool === "insert_at_line") {
+                      // Insert content at a specific line number
+                      const fileName = toolCall.args?.file_name;
+                      const lineNumber = toolCall.args?.line_number;
+                      const contentToInsert = toolCall.args?.content_to_insert;
+                      
+                      if (!fileName || !lineNumber || contentToInsert === undefined) {
+                        toolResult = "Error: 'insert_at_line' requires parameters: [file_name, line_number, content_to_insert].";
+                      } else {
+                        try {
+                          const fpath = validatePath(currentWorkingDirectory, fileName);
+                          let content = "";
+                          
+                          // Try to read existing file, or create new if doesn't exist
+                          try {
+                            content = await readFile(fpath, "utf-8");
+                          } catch {
+                            if (lineNumber !== 1) {
+                              toolResult = `Error: File '${fileName}' does not exist. Can only insert at line 1 in a new file.`;
+                            }
+                          }
+                          
+                          if (!toolResult) {
+                            const lines = content.split("\n");
+                            const insertIndex = Math.min(lineNumber - 1, lines.length);
+                            lines.splice(insertIndex, 0, contentToInsert);
+                            
+                            await writeFile(fpath, lines.join("\n"), "utf-8");
+                            toolResult = JSON.stringify({
+                              success: true,
+                              message: `Inserted ${contentToInsert.split('\n').length} line(s) at line ${lineNumber}`,
+                              new_line_count: lines.length,
+                            });
+                            filesModified.push(fileName);
+                          }
+                        } catch (e: any) {
+                          toolResult = `Error inserting text: ${e.message}`;
+                        }
+                      }
+                    } else if (toolCall.tool === "append_file") {
+                      // Append content to end of file
+                      const fileName = toolCall.args?.file_name;
+                      const contentToAppend = toolCall.args?.content;
+                      
+                      if (!fileName || !contentToAppend) {
+                        toolResult = "Error: 'append_file' requires parameters: [file_name, content].";
+                      } else {
+                        try {
+                          const fpath = validatePath(currentWorkingDirectory, fileName);
+                          await mkdir(dirname(fpath), { recursive: true });
+                          await appendFile(fpath, contentToAppend, "utf-8");
+                          toolResult = JSON.stringify({
+                            success: true,
+                            message: `Content appended to ${fileName}`,
+                          });
+                          filesModified.push(fileName);
+                        } catch (e: any) {
+                          toolResult = `Error appending to file: ${e.message}`;
+                        }
+                      }
+                    } else if (toolCall.tool === "delete_lines_in_file") {
+                      // Delete specific lines from a file
+                      const fileName = toolCall.args?.file_name;
+                      const startLine = toolCall.args?.start_line;
+                      const endLine = toolCall.args?.end_line ?? startLine;
+                      
+                      if (!fileName || !startLine) {
+                        toolResult = "Error: 'delete_lines_in_file' requires parameters: [file_name, start_line].";
+                      } else {
+                        try {
+                          const fpath = validatePath(currentWorkingDirectory, fileName);
+                          let content = "";
+                          
+                          try {
+                            content = await readFile(fpath, "utf-8");
+                          } catch {
+                            toolResult = `Error: File '${fileName}' does not exist.`;
+                          }
+                          
+                          if (!toolResult) {
+                            const lines = content.split("\n");
+                            
+                            if (startLine > lines.length) {
+                              toolResult = `Error: Start line ${startLine} is beyond the end of the file (${lines.length} lines).`;
+                            } else {
+                              const deleteCount = Math.min(endLine - startLine + 1, lines.length - startLine + 1);
+                              
+                              if (deleteCount <= 0) {
+                                toolResult = `Error: Invalid line range. End line must be >= Start line.`;
+                              } else {
+                                lines.splice(startLine - 1, deleteCount);
+                                
+                                await writeFile(fpath, lines.join("\n"), "utf-8");
+                                toolResult = JSON.stringify({
+                                  success: true,
+                                  message: `Deleted ${deleteCount} line(s) (lines ${startLine}-${endLine})`,
+                                  new_line_count: lines.length,
+                                });
+                                filesModified.push(fileName);
+                              }
+                            }
+                          }
+                        } catch (e: any) {
+                          toolResult = `Error deleting lines: ${e.message}`;
+                        }
+                      }
                     }
                   }
                   // --- Web ---
@@ -2627,10 +3177,31 @@ Always assume relative paths are from this directory.`;
                     if (toolCall.tool === "run_python") {
                       const res = await originalRunPythonImplementation({ python: toolCall.args.python });
                       toolResult = res.stderr ? `Error: ${res.stderr}` : res.stdout;
+                    } else if (toolCall.tool === "run_javascript") {
+                      const res = await originalRunJavascriptImplementation({ 
+                        javascript: toolCall.args.javascript,
+                        timeout_seconds: toolCall.args.timeout_seconds 
+                      });
+                      toolResult = res.stderr ? `Error: ${res.stderr}` : res.stdout;
                     }
                   }
 
-                  if (!toolResult) toolResult = "Error: Tool not found/allowed.";
+                  // --- Special Handling: finish_task is a termination signal, not an executable tool ---
+                  if (toolCall.tool === "finish_task") {
+                    const finishMessage = toolCall.args?.message || "Task completed.";
+                    const status = toolCall.args?.status || "success";
+
+                    if (subAgentDebugLogging) {
+                      console.log(`[Sub-Agent] finish_task called with status: ${status}`);
+                    }
+
+                    finalContent = finishMessage;
+                    msgList.push({ role: "user", content: `Tool Output: Task finished. Returning result.` });
+                    loops++;
+                    break; // Exit the agent loop - task is complete
+                  } else if (!toolResult) {
+                    toolResult = "Error: Tool not found/allowed.";
+                  }
                   } // Close the else { block from validation check
 
                 } catch (err: any) { toolResult = `Error: ${err.message}`; }
@@ -2692,45 +3263,76 @@ Always assume relative paths are from this directory.`;
                   }
                 }
 
-                // Check for explicit completion phrase or strict loop limit
-                const planningLikeText = /(?:\bI(?:'ll| will)\b|\blet me\b|\bnext\b|\bfirst\b)/i.test(trimmed);
-                const shouldTreatAsFinalResponse =
-                  executedToolCallCount > 0 &&
-                  trimmed.length >= 120 &&
-                  !planningLikeText;
+                // Check timeout first
+                const elapsedMs = Date.now() - startTime;
+                if (elapsedMs > timeoutMs) {
+                  if (subAgentDebugLogging) {
+                    console.log(`[Sub-Agent] Timeout reached after ${elapsedMs}ms`);
+                  }
+                  finalContent = `[TIMEOUT] Sub-agent exceeded time limit of ${subAgentTimeLimit}s. Task terminated early.`;
+                  break;
+                }
 
-                if (content.includes("TASK_COMPLETED") || shouldTreatAsFinalResponse || loops >= loopLimit - 1) {
+                // Check for explicit finish_task tool call
+                if (toolCall && toolCall.tool === "finish_task") {
+                  noToolCallCount = 0;
+                  executedToolCallCount++;
+                  msgList.push({ role: "assistant", content: content });
+                  
+                  const finishMessage = toolCall.args?.message || "Task completed.";
+                  const status = toolCall.args?.status || "success";
+                  
+                  if (subAgentDebugLogging) {
+                    console.log(`[Sub-Agent] finish_task called with status: ${status}`);
+                  }
+                  
+                  finalContent = finishMessage;
+                  msgList.push({ role: "user", content: `Tool Output: Task finished. Returning result.` });
+                  loops++;
+                  break; // Done via finish_task
+                }
+
+                // Fallback: strict loop limit or explicit completion phrase (legacy support)
+                if (content.includes("TASK_COMPLETED") || loops >= loopLimit - 1) {
                   break; // Done
                 } else {
                   noToolCallCount++;
-                  if (content.trim().length > 0) {
-                    msgList.push({ role: "assistant", content: content });
-                  }
 
-                  let reminder = "SYSTEM NOTICE: You did not call a tool. If you are finished, output 'TASK_COMPLETED'. If not, USE A TOOL now and return a single JSON tool-call object only (no prose).";
-                  if (toolsEnabled) {
-                    if (allowFileSystem && suggestedReadPath && noToolCallCount <= 3) {
-                      const escapedPath = suggestedReadPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-                      reminder += `\nSuggested next step: {"tool":"read_file","args":{"file_name":"${escapedPath}"}}`;
-                    } else if (allowFileSystem && noToolCallCount <= 3) {
-                      reminder += `\nSuggested next step: {"tool":"list_directory","args":{}}`;
+                  // --- Fix: Detect empty-output death spiral ---
+                  // When the model outputs nothing after tool calls have been made, adding more system
+                  // notices just makes it worse. Break out with what we have instead of spinning forever.
+                  if (content.trim().length === 0 && executedToolCallCount > 0) {
+                    if (subAgentDebugLogging) {
+                      console.log(`[Sub-Agent] Model outputting nothing after ${noToolCallCount} attempts. Breaking to prevent death spiral.`);
                     }
+                    finalContent = `Model stopped producing responses after ${executedToolCallCount} tool call(s). Task terminated early.`;
+                    break;
                   }
 
-                  msgList.push({ role: "system", content: reminder });
+                  // --- Fix: Cap system notices to avoid context bloat and model confusion ---
+                  const maxSystemNotices = 2;
+                  if (content.trim().length > 0 || noToolCallCount <= maxSystemNotices) {
+                    if (content.trim().length > 0) {
+                      msgList.push({ role: "assistant", content: content });
+                    }
+
+                    let reminder = "SYSTEM NOTICE: You did not call a tool. If you are finished, CALL 'finish_task' with your final message. If not, USE A TOOL now and return a single JSON tool-call object only (no prose).";
+                    if (toolsEnabled) {
+                      if (allowFileSystem && suggestedReadPath && noToolCallCount <= 3) {
+                        const escapedPath = suggestedReadPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+                        reminder += `\nSuggested next step: {"tool":"read_file","args":{"file_name":"${escapedPath}"}}`;
+                      } else if (allowFileSystem && noToolCallCount <= 3) {
+                        reminder += `\nSuggested next step: {"tool":"list_directory","args":{}}`;
+                      }
+                    }
+
+                    msgList.push({ role: "system", content: reminder });
+                  }
                   loops++;
                 }
               }
             } catch (err: any) { return { error: err.message, filesModified }; }
 
-            // Prevent unbounded memory growth
-            if (msgList.length > 20) {
-              // Keep system message (index 0) and last 18 messages
-              const systemMsg = msgList[0];
-              const recentMsgs = msgList.slice(-18);
-              msgList.length = 0;
-              msgList.push(systemMsg, ...recentMsgs);
-            }
           }
 
           if (finalContent) {
@@ -2868,44 +3470,91 @@ Always assume relative paths are from this directory.`;
             }
           }
 
+
+          // --- Diagnostic Logging Termination ---
+          if (subAgentDebugLogging) {
+            let terminationReason = "unknown";
+            if (finalContent.startsWith("[TIMEOUT]")) {
+              terminationReason = "timeout";
+            } else if (executedToolCallCount > 0 && noToolCallCount >= 2) {
+              terminationReason = "prose_fallback";
+            } else if (loops >= loopLimit - 1) {
+              terminationReason = "loop_limit";
+            } else if (noToolCallCount === 0 && executedToolCallCount > 0) {
+              terminationReason = "finish_task";
+            }
+
+            console.log(`[Sub-Agent] Loop terminated: ${terminationReason}`);
+            console.log(`[Sub-Agent] Total iterations: ${loops}, Tool calls executed: ${executedToolCallCount}, No-tool-call streak: ${noToolCallCount}`);
+          }
           return { response: finalContent, filesModified, handoff_message: handoffMessage || undefined };
         };
 
         // --- 1. Primary Agent Loop ---
-        const primaryResult = await runAgentLoop(agent_role, task, context, 8, false, currentWorkingDirectory);
+        const startTime = Date.now();
+        const timeoutMs = subAgentTimeLimit * 1000;
+        const primaryResult = await runAgentLoop(agent_role, task, context, undefined, false, currentWorkingDirectory);
         if (primaryResult.error) return { error: primaryResult.error };
 
         finalResponse = primaryResult.response || "";
         handoffMessage = primaryResult.handoff_message;
-        const generatedFiles = [...primaryResult.filesModified];
+        const generatedFiles = [...(primaryResult.filesModified || [])];
 
         // --- 2. Auto-Debug Loop ---
-        if (debugMode && primaryResult.filesModified.length > 0) {
+        if (debugMode && primaryResult.filesModified?.length > 0 && !finalResponse.startsWith("[TIMEOUT]")) {
           const filesToCheck = primaryResult.filesModified.join(", ");
-          const debugTask = `Review the code in these files: ${filesToCheck}. Check for bugs, syntax errors, or logic flaws. If you find any, use 'save_file' to FIX them. If they are correct, confirm it.`;
+          
+          // Calculate remaining time for debug loop (max 50% of original budget, min 30s)
+          const elapsedMs = Date.now() - startTime;
+          const remainingBudget = Math.max(30000, timeoutMs / 2);
+          const debugTimeoutLimit = Math.floor((remainingBudget - elapsedMs) / 1000);
 
-          // Read content of modified files to pass as context
-          let debugContext = "Here is the content of the created files:\n";
-          for (const f of primaryResult.filesModified) {
-            try {
-              const c = await readFile(join(currentWorkingDirectory, f), "utf-8");
-              debugContext += `\n--- ${f} ---\n${c}\n`;
-            } catch (e) { }
-          }
+          if (debugTimeoutLimit <= 0) {
+            if (subAgentDebugLogging) console.log("[Sub-Agent] Skipping auto-debug: no time remaining.");
+          } else {
+            const debugTask = `You are a Senior Code Reviewer. 
+Original Task: ${task}
+Files Created/Modified: ${filesToCheck}
 
-          const debugResult = await runAgentLoop("reviewer", debugTask, debugContext, 5, true, currentWorkingDirectory);
+Review the code for these files. Check for:
+1. Syntax errors and logic flaws.
+2. Security vulnerabilities or unsafe practices.
+3. Whether it actually fulfills the original task requirements.
 
-          finalResponse += "\n\n--- Auto-Debug Report ---\n" + (debugResult.response || "Debug pass completed.");
-          if (debugResult.filesModified.length > 0) {
-            finalResponse += `\n(The reviewer fixed these files: ${debugResult.filesModified.join(", ")})`;
-          }
-          if (!handoffMessage && debugResult.handoff_message) {
-            handoffMessage = debugResult.handoff_message;
+If you find issues, use 'save_file' to FIX them completely. 
+If the code is correct and complete, confirm it.`;
+
+            // Pass limited context to avoid blowing up the context window
+            let debugContext = `Current Working Directory: ${currentWorkingDirectory}\n\n`;
+            if (!primaryResult.filesModified?.length) return { error: "No files modified" };
+            for (const f of primaryResult.filesModified) {
+              try {
+                const c = await readFile(join(currentWorkingDirectory, f), "utf-8");
+                // Cap file content to ~5KB to prevent context overflow
+                const limitedContent = c.length > 5000 ? c.substring(0, 5000) + "\n... (truncated)" : c;
+                debugContext += `--- ${f} ---\n${limitedContent}\n`;
+              } catch (e) { }
+            }
+
+            // Run reviewer loop (timeout-enforced, no artificial iteration limit)
+            const debugResult = await runAgentLoop("reviewer", debugTask, debugContext, undefined, true, currentWorkingDirectory);
+
+            if (!debugResult.error) {
+              finalResponse += "\n\n--- Auto-Debug Report ---\n" + (debugResult.response || "Debug pass completed.");
+              if (debugResult.filesModified?.length > 0) {
+                finalResponse += `\n(The reviewer fixed these files: ${debugResult.filesModified.join(", ")})`;
+              }
+              if (!handoffMessage && debugResult.handoff_message) {
+                handoffMessage = debugResult.handoff_message;
+              }
+            } else {
+              finalResponse += "\n\n--- Auto-Debug Report ---\n[Error during review pass: " + debugResult.error + "]";
+            }
           }
         }
 
         // Append generated file list for Main Agent visibility
-        if (primaryResult.filesModified.length > 0) {
+        if (primaryResult.filesModified?.length > 0) {
           const fullPaths = primaryResult.filesModified.map(f => {
             if (isAbsolute(f)) return f;
             return join(currentWorkingDirectory, f);
@@ -2914,6 +3563,7 @@ Always assume relative paths are from this directory.`;
 
           if (showFullCode) {
             finalResponse += `\n\n### Generated Code Content:\n`;
+            if (!primaryResult.filesModified?.length) return { error: "No files modified" };
             for (const f of primaryResult.filesModified) {
               try {
                 const fpath = isAbsolute(f) ? f : join(currentWorkingDirectory, f);
@@ -2929,7 +3579,7 @@ Always assume relative paths are from this directory.`;
         // If nothing was written to disk, leave the raw response intact so the primary agent
         // can see what the sub-agent actually did (or didn't do) rather than being misled
         // by a false "code has been handled" success message.
-        if (!showFullCode && primaryResult.filesModified.length > 0) {
+        if (!showFullCode && primaryResult.filesModified?.length > 0) {
           finalResponse = finalResponse.replace(/```[\s\S]*?```/g, "\n[System: Code Block Hidden for Brevity. The code has been handled/saved by the sub-agent. Do NOT request it again. Proceed.]\n");
         }
 

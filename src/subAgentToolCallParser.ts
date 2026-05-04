@@ -74,9 +74,30 @@ function normalizeContent(content: unknown): string {
 
 function normalizeToolName(value: unknown): string | null {
   if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  return trimmed.startsWith("functions.") ? trimmed.slice("functions.".length) : trimmed;
+  let normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+
+  if (normalized.startsWith("functions.")) {
+    normalized = normalized.slice("functions.".length);
+  }
+
+  // Handle common hallucinations and aliases
+  const mapping: Record<string, string> = {
+    "write_file": "save_file",
+    "savefile": "save_file",
+    "create_file": "save_file",
+    "overwrite_file": "save_file",
+    "readfile": "read_file",
+    "list_dir": "list_directory",
+    "ls": "list_directory",
+    "find_file": "find_files",
+    "search_file": "search_file_content",
+    "grep": "search_file_content",
+    "replace_text": "replace_text_in_file",
+    "replace_in_file": "replace_text_in_file"
+  };
+
+  return mapping[normalized] || normalized;
 }
 
 function tryParseJson(text: string): JsonValue | undefined {
@@ -98,26 +119,47 @@ function normalizeArgs(toolName: string, args: unknown): Record<string, any> {
     return {};
   }
 
-  if (toolName === "read_file" || toolName === "replace_text_in_file") {
-    const fileArgs = { ...normalized } as Record<string, unknown>;
-    if (typeof fileArgs.path === "string" && fileArgs.file_name === undefined) {
-      fileArgs.file_name = fileArgs.path;
+  const result = { ...normalized } as Record<string, any>;
+
+  // Generic path/data normalization for file tools
+  const fileTools = [
+    "read_file", "save_file", "replace_text_in_file", "read_file_range", 
+    "search_file_content", "search_in_file", "insert_at_line", 
+    "append_file", "delete_lines_in_file"
+  ];
+  
+  if (fileTools.includes(toolName)) {
+    if (typeof result.path === "string" && result.file_name === undefined) {
+      result.file_name = result.path;
     }
-    return fileArgs;
+    if (typeof result.file_path === "string" && result.file_name === undefined) {
+      result.file_name = result.file_path;
+    }
+    if (typeof result.name === "string" && result.file_name === undefined) {
+      result.file_name = result.name;
+    }
   }
 
-  if (toolName === "save_file") {
-    const saveArgs = { ...normalized } as Record<string, unknown>;
-    if (typeof saveArgs.path === "string" && saveArgs.file_name === undefined) {
-      saveArgs.file_name = saveArgs.path;
+  // Generic data/content normalization
+  if (["save_file", "append_file", "insert_at_line"].includes(toolName)) {
+    if (typeof result.data === "string" && result.content === undefined) {
+      result.content = result.data;
     }
-    if (typeof saveArgs.data === "string" && saveArgs.content === undefined) {
-      saveArgs.content = saveArgs.data;
+    if (toolName === "insert_at_line" && typeof result.content === "string" && result.content_to_insert === undefined) {
+      result.content_to_insert = result.content;
     }
-    return saveArgs;
   }
 
-  return normalized;
+  // Specific tool tweaks
+  if (toolName === "fuzzy_find_local_files" && !result.query && result.pattern) {
+    result.query = result.pattern;
+  }
+  
+  if ((toolName === "search_file_content" || toolName === "search_in_file") && !result.pattern && result.query) {
+    result.pattern = result.query;
+  }
+
+  return result;
 }
 
 function buildToolCall(toolName: unknown, args: unknown): ParsedToolCall | null {
@@ -390,6 +432,28 @@ function parseToolCallFromContent(text: string): ParsedToolCall | null {
     if (parsedJson === undefined) continue;
     const parsedTool = parseToolCallObject(parsedJson, text);
     if (parsedTool) return parsedTool;
+  }
+
+  // --- Fix: Fallback for mixed prose+JSON tool calls ---
+  // When the model outputs something like:
+  //   "Now I have data... {"tool": "save_file", "args": {...}}"
+  // The balanced JSON extractor above may fail because the whole text isn't valid JSON.
+  // This fallback specifically looks for tool call patterns embedded within prose text.
+  const toolMatch = text.match(/\{"[\s]*tool[\s]*"[\s]*:[\s]*"([a-zA-Z0-9_.-]+)"/);
+  if (toolMatch) {
+    // Find the matching closing brace by looking for args object
+    const argsStartIdx = text.indexOf('{', toolMatch.index || 0);
+    if (argsStartIdx >= 0) {
+      const closeBraceIdx = findMatchingBrace(text, argsStartIdx);
+      if (closeBraceIdx > 0) {
+        const jsonSnippet = text.slice(argsStartIdx, closeBraceIdx + 1);
+        const parsedJson = tryParseJson(jsonSnippet);
+        if (parsedJson && isRecord(parsedJson)) {
+          const parsedTool = parseToolCallObject(parsedJson, text);
+          if (parsedTool) return parsedTool;
+        }
+      }
+    }
   }
   return null;
 }
