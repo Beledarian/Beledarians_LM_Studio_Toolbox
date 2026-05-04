@@ -12,6 +12,7 @@ import { rankFuzzyMatches } from "./fuzzySearch";
 import { extractHandoffMessage } from "./handoffMessage";
 import { parseSubAgentResponseMessage, type ParsedToolCall } from "./subAgentToolCallParser";
 import { validateToolCall } from "./toolCallValidator";
+import { backgroundCommands, generateId, BackgroundCommand } from "./backgroundCommands";
 
 import type { Browser, Page } from "puppeteer";
 
@@ -744,8 +745,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         continue;
       }
 
-      if (/[ \*\?<>|"]/.test(file_name)) {
-        errors.push("Filename " + file.file_name + " contains invalid characters");\n        continue;
+      if (file.file_name && /[ \*\?<>|"]/.test(file.file_name)) {
+        errors.push("Filename " + file.file_name + " contains invalid characters");
       }
 
         try {
@@ -812,6 +813,246 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     },
   });
   tools.push(replaceTextTool);
+
+  const multiReplaceTextTool = tool({
+    name: "multi_replace_text",
+    description: text`
+      Replace multiple scattered text blocks in a single file safely.
+      Each replacement must specify start_line, end_line, old_string, and new_string.
+      The old_string must perfectly match what is currently in the file.
+    `,
+    parameters: {
+      file_name: z.string(),
+      replacements: z.array(z.object({
+        start_line: z.number().int().min(1),
+        end_line: z.number().int().min(1),
+        old_string: z.string(),
+        new_string: z.string()
+      })).describe("Array of replacements to make in the file")
+    },
+    implementation: async ({ file_name, replacements }) => {
+      try {
+        const filePath = validatePath(currentWorkingDirectory, file_name);
+        const content = await readFile(filePath, "utf-8");
+        let lines = content.split("\n");
+        let errors = [];
+        
+        // Sort replacements from bottom to top to avoid line index shifts!
+        const sortedReplacements = [...replacements].sort((a, b) => b.start_line - a.start_line);
+        
+        for (const rep of sortedReplacements) {
+          if (rep.start_line > rep.end_line) {
+            errors.push(`Invalid range: start_line ${rep.start_line} > end_line ${rep.end_line}`);
+            continue;
+          }
+          const chunk = lines.slice(rep.start_line - 1, rep.end_line).join("\n");
+          if (!chunk.includes(rep.old_string)) {
+            errors.push(`Could not find old_string between lines ${rep.start_line}-${rep.end_line}`);
+            continue;
+          }
+          // Only replace the first occurrence in the exact block
+          const newChunk = chunk.replace(rep.old_string, rep.new_string);
+          const newChunkLines = newChunk.split("\n");
+          
+          lines.splice(rep.start_line - 1, rep.end_line - rep.start_line + 1, ...newChunkLines);
+        }
+        
+        if (errors.length > 0) {
+          return { error: "Replacements failed:\n" + errors.join("\n") };
+        }
+        
+        await writeFile(filePath, lines.join("\n"), "utf-8");
+        return { success: true, message: `Applied ${replacements.length} replacements to ${file_name}` };
+      } catch (e) {
+        return { error: `Failed to multi-replace: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    }
+  });
+  tools.push(multiReplaceTextTool);
+
+  const searchDirectoryTool = tool({
+    name: "search_directory",
+    description: text`
+      Search an entire directory for a regex pattern (like grep).
+      Returns matching file paths and line numbers.
+    `,
+    parameters: {
+      directory_path: z.string().optional().describe("Directory to search. Defaults to workspace root."),
+      pattern: z.string().describe("Regex pattern or string to search for"),
+      use_regex: z.boolean().optional().default(false)
+    },
+    implementation: async ({ directory_path, pattern, use_regex }) => {
+      try {
+        const targetDir = directory_path ? validatePath(currentWorkingDirectory, directory_path) : currentWorkingDirectory;
+        const regex = new RegExp(use_regex ? pattern : pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\  tools.push(replaceTextTool);'), 'g');
+        const results: string[] = [];
+        let searchedCount = 0;
+        
+        async function search(dir: string) {
+          const files = await readdir(dir);
+          for (const file of files) {
+            if (file === "node_modules" || file === ".git" || file.startsWith(".")) continue;
+            const fullPath = join(dir, file);
+            const st = await stat(fullPath);
+            if (st.isDirectory()) {
+              await search(fullPath);
+            } else if (st.isFile()) {
+              if (st.size > 2000000) continue; // Skip large files > 2MB
+              try {
+                const content = await readFile(fullPath, "utf-8");
+                if (content.includes('\0')) continue; // Skip binary
+                
+                const lines = content.split('\n');
+                for (let i = 0; i < lines.length; i++) {
+                  if (lines[i].match(regex)) {
+                    results.push(`${relative(currentWorkingDirectory, fullPath)}:${i+1} => ${lines[i].trim()}`);
+                    if (results.length >= 100) return; // Limit output
+                  }
+                }
+                searchedCount++;
+              } catch (e) {}
+            }
+          }
+        }
+        
+        await search(targetDir);
+        
+        if (results.length === 0) return { message: `No matches found. Searched ${searchedCount} files.` };
+        return { matches: results, message: `Found ${results.length} matches across ${searchedCount} files searched.` };
+      } catch (e) {
+        return { error: `Search failed: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    }
+  });
+  tools.push(searchDirectoryTool);
+
+  const runBackgroundCommandTool = tool({
+    name: "run_background_command",
+    description: text`
+      Starts a long-running process in the background. The process is not blocked, allowing you to do other things.
+      You MUST provide a timeout (max 10 hours) and a descriptive name.
+    `,
+    parameters: {
+      command: z.string(),
+      timeout_hours: z.number().max(10).describe("MANDATORY: How long the process is allowed to run before being killed."),
+      name: z.string().describe("MANDATORY: A short, descriptive name for the background task (e.g. 'Vite Dev Server')")
+    },
+    implementation: async ({ command, timeout_hours, name }) => {
+      try {
+        if (!timeout_hours) return { error: "timeout_hours is MANDATORY" };
+        if (!name) return { error: "name is MANDATORY" };
+        
+        const timeoutMs = timeout_hours * 60 * 60 * 1000;
+        const id = generateId();
+        
+        const isWindows = os.platform() === "win32";
+        const shellCmd = isWindows ? "cmd.exe" : "sh";
+        const shellArgs = isWindows ? ["/c", command] : ["-c", command];
+        
+        const proc = spawn(shellCmd, shellArgs, { cwd: currentWorkingDirectory });
+        
+        const bgCmd: BackgroundCommand = {
+          id,
+          name,
+          startTime: Date.now(),
+          process: proc,
+          timeoutMs,
+          stdout: "",
+          stderr: "",
+          status: "running" as const
+        };
+        
+        proc.stdout.on("data", (data) => {
+          bgCmd.stdout += data.toString();
+          if (bgCmd.stdout.length > 50000) bgCmd.stdout = bgCmd.stdout.slice(-50000);
+        });
+        
+        proc.stderr.on("data", (data) => {
+          bgCmd.stderr += data.toString();
+          if (bgCmd.stderr.length > 50000) bgCmd.stderr = bgCmd.stderr.slice(-50000);
+        });
+        
+        proc.on("close", (code) => {
+          bgCmd.status = bgCmd.status === "cancelled" || bgCmd.status === "timeout" ? bgCmd.status : "completed";
+          bgCmd.exitCode = code;
+          if (bgCmd.timeoutHandle) clearTimeout(bgCmd.timeoutHandle);
+        });
+        
+        proc.on("error", (err) => {
+          bgCmd.status = "error";
+          bgCmd.stderr += `\nError: ${err.message}`;
+        });
+        
+        bgCmd.timeoutHandle = setTimeout(() => {
+          if (bgCmd.status === "running") {
+            bgCmd.status = "timeout";
+            proc.kill("SIGKILL");
+          }
+        }, timeoutMs);
+        
+        backgroundCommands.set(id, bgCmd);
+        
+        // Wait briefly to catch immediate errors
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        
+        return { 
+          id, 
+          status: bgCmd.status,
+          message: `Command launched. Use check_background_command with ID ${id} to poll output.`,
+          initial_stdout: bgCmd.stdout.slice(-1000),
+          initial_stderr: bgCmd.stderr.slice(-1000)
+        };
+      } catch (e) {
+        return { error: `Failed to launch: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    }
+  });
+  tools.push(runBackgroundCommandTool);
+
+  const checkBackgroundCommandTool = tool({
+    name: "check_background_command",
+    description: "Check the status, stdout, and stderr of a running or completed background command.",
+    parameters: {
+      id: z.string()
+    },
+    implementation: async ({ id }) => {
+      const bgCmd = backgroundCommands.get(id);
+      if (!bgCmd) return { error: `No background command found with ID ${id}` };
+      
+      return {
+        id: bgCmd.id,
+        name: bgCmd.name,
+        status: bgCmd.status,
+        duration_seconds: Math.floor((Date.now() - bgCmd.startTime) / 1000),
+        stdout_tail: bgCmd.stdout.slice(-2000), // last 2000 chars
+        stderr_tail: bgCmd.stderr.slice(-2000),
+        exitCode: bgCmd.exitCode
+      };
+    }
+  });
+  tools.push(checkBackgroundCommandTool);
+
+  const cancelBackgroundCommandTool = tool({
+    name: "cancel_background_command",
+    description: "Kills a running background command.",
+    parameters: {
+      id: z.string()
+    },
+    implementation: async ({ id }) => {
+      const bgCmd = backgroundCommands.get(id);
+      if (!bgCmd) return { error: `No background command found with ID ${id}` };
+      
+      if (bgCmd.status !== "running") return { message: `Command is already ${bgCmd.status}` };
+      
+      bgCmd.status = "cancelled";
+      bgCmd.process.kill("SIGKILL");
+      if (bgCmd.timeoutHandle) clearTimeout(bgCmd.timeoutHandle);
+      
+      return { success: true, message: `Command ${id} killed.` };
+    }
+  });
+  tools.push(cancelBackgroundCommandTool);
+
 
   const listDirectoryTool = tool({
     name: "list_directory",
