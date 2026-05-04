@@ -55,7 +55,7 @@ export const en: LocaleDict = {
     allowGitHubTools: {
       displayName: "Allow GitHub CLI Tools",
       subtitle:
-        "Enable native GitHub CLI tools (gh_auth, gh_create_issue/pr, gh_list_issues/prs, gh_view_comments/diff, gh_push). Requires 'gh' installed.",
+        "Enable native GitHub CLI tools. Requires 'gh' installed.",
     },
     allowDatabaseInspection: {
       displayName: "Allow Database Inspection",
