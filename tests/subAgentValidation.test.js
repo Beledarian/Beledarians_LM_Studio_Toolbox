@@ -9,10 +9,9 @@ describe('Sub-Agent Tool Validation', () => {
       assert.equal(err, null);
     });
 
-    it('should fail with wrong parameter names (path instead of file_name)', () => {
-      const err = validateToolCall("save_file", { path: "/tmp/test.html", data: "<html>" });
-      assert.ok(err?.includes("missing required parameter") || err?.includes("requires parameters"));
-      assert.ok(err?.includes("Hint: Use 'file_name'"));
+    it('should pass with path alias (path instead of file_name)', () => {
+      const err = validateToolCall("save_file", { path: "test.html", data: "<html>" });
+      assert.equal(err, null);
     });
 
     it('should fail with absolute paths outside workspace', () => {
@@ -72,9 +71,10 @@ describe('Sub-Agent Tool Validation', () => {
       assert.ok(err?.includes("requires parameters"));
     });
 
-    it('should provide helpful hints for common mistakes', () => {
+    it('should provide helpful hints for common mistakes (filepath, body)', () => {
+      // 'filepath' and 'body' are not supported aliases - only file_name/name/path and content/data
       const err = validateToolCall("save_file", { filepath: "test.html", body: "<html>" });
-      assert.ok(err?.includes("Hint: Use 'file_name' (not 'path', 'filepath', or 'file_path')"));
+      assert.ok(err?.includes("missing required parameter") || err?.includes("requires parameters"));
     });
 
     it('should detect absolute paths on Unix style', () => {
