@@ -111,6 +111,7 @@ export function detectSystemLanguage(): string {
  *   de-*, de → "de"
  */
 export function resolveLocale(raw: string): string {
+  if (!raw || typeof raw !== "string") return "en";
   const tag = raw.toLowerCase();
 
   // ── Chinese – Traditional ──────────────────────────────────

@@ -1,5 +1,7 @@
 # Beledarian's LM Studio Tools
 
+[English](README.md) | [Deutsch](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox/blob/main/README.de.md) | [简体中文](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox/blob/main/README.zh-CN.md) | [繁體中文](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox/blob/main/README.zh-TW.md)
+
 [![GitHub](https://img.shields.io/badge/GitHub-Repository-blue?logo=github)](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox)
 
 This project is a plugin for [LM Studio](https://lmstudio.ai/) that provides a rich set of tools to a large language model. It acts as a bridge between the LLM and your local environment, enabling autonomous coding, research, and file management.
@@ -28,15 +30,15 @@ This project is a plugin for [LM Studio](https://lmstudio.ai/) that provides a r
 - **🌐 Dual-Layer Translation:** Supports both "Config UI" (static) and "Agent Messages" (dynamic runtime) languages.
 - **🔄 UI Language Override:** Added a field to manually force the Config UI into a specific locale for testing, bypassing OS-level detection on the next plugin restart.
 
-### Recent Updates (v1.3.0)
+<details>
+<summary><strong>Older Updates (v1.3.0 & earlier)</strong></summary>
+
+### v1.3.0
 
 - **🐙 Native GitHub CLI Tools:** Added `gh_auth`, `gh_create_issue`, `gh_list_issues`, `gh_view_comments`, `gh_create_pr`, `gh_list_prs`, `gh_view_pr_diff`, and `gh_push` for secure, structured GitHub interactions without generic shell commands
 - **🌿 Enhanced Git Workflow:** Added `git_add` and `git_checkout` tools to complete the native git toolchain (status, diff, log, commit, add, checkout)
 - **⚙️ New Sidebar Toggle:** Added "Allow GitHub CLI Tools" setting to enable/disable `gh_*` tools independently
 - **🛡️ Dependency Guards:** All CLI tools now verify installation before execution and provide clear prompts if missing
-
-<details>
-<summary><strong>Older Updates (v1.2.x & earlier)</strong></summary>
 
 ### v1.2.0
 
