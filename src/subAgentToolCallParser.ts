@@ -20,6 +20,22 @@ function sanitizeContent(text: string): string {
     .replace(/<\|tool_call\>/gi, "")
     .replace(/<tool_call\|>/gi, "")
     .replace(/<\|.*?\|>/g, "")
+    // Strip XML-style thinking tags (e.g., <antThinking>, <thinking>) emitted by Claude and other models.
+    // These models embed their chain-of-thought in the content field wrapped in these tags.
+    .replace(/<antThinking[^>]*>[\s\S]*?(?:<\/antThinking>|$)/gi, "")
+    .replace(/<thinking[^>]*>[\s\S]*?(?:<\/thinking>|$)/gi, "")
+
+    // Strip leading "Thought: ..." reasoning block emitted by DeepSeek-R1, QwQ, etc.
+    // These models embed their chain-of-thought in the content field prefixed with "Thought:",
+    // separated from the actual response by a blank line (or sometimes just a single newline).
+    // The regex matches "Thought:" followed by any content up to:
+    // - A blank line (\n\n or \r\n\r\n), OR
+    // - A single newline if no blank line exists, OR
+    // - End of string if there's no separator at all
+    .replace(/^Thought:[\s\S]*?(?:\n\n|\r\n\r\n|\n|$)/, "")
+    // Strip "Thought for N seconds" preamble emitted by thinking models (e.g. DeepSeek-R1, QwQ).
+    // Handles integers, decimals, and optional trailing whitespace/newlines.
+    .replace(/^Thought for [\d.]+ seconds?\s*/i, "")
     .trim();
 }
 
@@ -119,8 +135,11 @@ function isMatchingBracket(open: string, close: string): boolean {
 
 function extractBalancedJsonSnippets(text: string, maxSnippets = 12): string[] {
   const snippets: string[] = [];
+  let iterations = 0;
+  const MAX_ITERATIONS = 500000;
 
   for (let start = 0; start < text.length; start++) {
+    if (iterations > MAX_ITERATIONS) break;
     const opener = text[start];
     if (opener !== "{" && opener !== "[") continue;
 
@@ -129,7 +148,12 @@ function extractBalancedJsonSnippets(text: string, maxSnippets = 12): string[] {
     let escaped = false;
     let invalid = false;
 
-    for (let end = start + 1; end < text.length; end++) {
+    // Limit the lookahead to prevent O(N^2) event loop blocking
+    const endLimit = Math.min(text.length, start + 30000);
+
+    for (let end = start + 1; end < endLimit; end++) {
+      iterations++;
+      if (iterations > MAX_ITERATIONS) break;
       const char = text[end];
 
       if (inString) {

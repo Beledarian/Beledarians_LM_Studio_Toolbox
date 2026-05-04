@@ -11,18 +11,20 @@ import { executeBrowserActions } from "./browserActions";
 import { rankFuzzyMatches } from "./fuzzySearch";
 import { extractHandoffMessage } from "./handoffMessage";
 import { parseSubAgentResponseMessage, type ParsedToolCall } from "./subAgentToolCallParser";
+import { validateToolCall } from "./toolCallValidator";
+
 import type { Browser, Page } from "puppeteer";
 
 // --- Security Helper ---
 function validatePath(baseDir: string, requestedPath: string): string {
   const resolved = resolve(baseDir, requestedPath);
-  // Normalize checking to prevent casing bypass on Windows
-  const lowerResolved = resolved.toLowerCase();
-  const lowerBase = resolve(baseDir).toLowerCase();
-
-  if (!lowerResolved.startsWith(lowerBase)) {
+  
+  // Use relative pathing to ensure the resolved path stays within baseDir
+  const rel = relative(baseDir, resolved);
+  if (rel.startsWith("..") || isAbsolute(rel)) {
     throw new Error(`Access Denied: Path '${requestedPath}' is outside the workspace.`);
   }
+  
   return resolved;
 }
 
@@ -156,12 +158,23 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     isWorkspaceInitialized = true;
   }
 
+  // Persist uiLanguageOverride on every plugin load so i18n.ts can read it
+  // synchronously at the next startup — no message required.
+  const uiLanguageOverride = pluginConfig.get("uiLanguageOverride");
+  if (fullState.uiLanguageOverride !== uiLanguageOverride) {
+    fullState.uiLanguageOverride = uiLanguageOverride;
+    await savePersistedState(fullState);
+    console.log(`[i18n] uiLanguageOverride persisted: "${uiLanguageOverride}". Restart plugin to apply.`);
+  }
+
+
   const tools: Tool[] = [];
   let browserSession: { browser: Browser; page: Page; currentUrl: string } | null = null;
 
   const allowGit = pluginConfig.get("allowGitOperations");
   const allowDb = pluginConfig.get("allowDatabaseInspection");
   const allowNotify = pluginConfig.get("allowSystemNotifications");
+  const allowGitHubTools = pluginConfig.get("allowGitHubTools");
 
   // --- Git Tools ---
   if (allowGit) {
@@ -245,6 +258,55 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
       }
     });
     tools.push(gitLogTool);
+
+    const gitAddTool = tool({
+      name: "git_add",
+      description: "Stage specific files or all changes for the next commit.",
+      parameters: {
+        paths: z.array(z.string()).optional().describe("Optional: Specific file paths to stage. If omitted, stages all changes."),
+      },
+      implementation: async ({ paths }) => {
+        const { simpleGit } = await import("simple-git");
+        const git = simpleGit(currentWorkingDirectory);
+        try {
+          if (paths && paths.length > 0) {
+            const validatedPaths = paths.map(p => validatePath(currentWorkingDirectory, p));
+            await git.add(validatedPaths);
+          } else {
+            await git.add(".");
+          }
+          return { success: true, message: "Files staged successfully." };
+        } catch (e) {
+          return { error: `Git add failed: ${e instanceof Error ? e.message : String(e)}` };
+        }
+      },
+    });
+    tools.push(gitAddTool);
+
+    const gitCheckoutTool = tool({
+      name: "git_checkout",
+      description: "Switch to an existing branch or create and switch to a new one.",
+      parameters: {
+        branch_name: z.string().describe("Name of the branch to checkout."),
+        create_new: z.boolean().optional().default(false).describe("If true, creates the branch if it doesn't exist (like git checkout -b)."),
+      },
+      implementation: async ({ branch_name, create_new = false }) => {
+        const { simpleGit } = await import("simple-git");
+        const git = simpleGit(currentWorkingDirectory);
+        try {
+          if (create_new) {
+            await git.checkout(["-b", branch_name]);
+          } else {
+            await git.checkout(branch_name);
+          }
+          return { success: true, message: `Switched to branch '${branch_name}'.` };
+        } catch (e) {
+          return { error: `Git checkout failed: ${e instanceof Error ? e.message : String(e)}` };
+        }
+      },
+    });
+    tools.push(gitCheckoutTool);
+
   }
 
   // --- Document Tools ---
@@ -311,7 +373,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
       },
       implementation: async ({ title, message }) => {
         const notifier = await import("node-notifier");
-        notifier.notify({
+        // node-notifier is a CommonJS module, so dynamic import returns it on .default
+        notifier.default.notify({
           title: title,
           message: message,
           sound: true,
@@ -1074,12 +1137,16 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         return parsedResults;
       };
 
-      const launchBrowser = async () => {
-        const puppeteer = await import("puppeteer");
-        return puppeteer.launch({
-          headless: true,
-          args: ["--no-sandbox", "--disable-setuid-sandbox"],
-        });
+      let sharedBrowser: Browser | null = null;
+      const getBrowser = async () => {
+        if (!sharedBrowser) {
+          const puppeteer = await import("puppeteer");
+          sharedBrowser = await puppeteer.launch({
+            headless: true,
+            args: ["--no-sandbox", "--disable-setuid-sandbox"],
+          });
+        }
+        return sharedBrowser;
       };
 
       const searchFunctions: Record<SearchProvider, (q: string) => Promise<SearchResult[]>> = {
@@ -1131,7 +1198,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         },
 
         "duckduckgo-html": async (q: string) => {
-          const browser = await launchBrowser();
+          const browser = await getBrowser();
           try {
             const page = await browser.newPage();
             await page.goto(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`, { waitUntil: "networkidle2", timeout: 15000 });
@@ -1146,7 +1213,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         },
 
         "google": async (q: string) => {
-          const browser = await launchBrowser();
+          const browser = await getBrowser();
           try {
             const page = await browser.newPage();
             await page.goto(`https://www.google.com/search?q=${encodeURIComponent(q)}`, { waitUntil: "networkidle2", timeout: 15000 });
@@ -1177,7 +1244,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         },
 
         "bing": async (q: string) => {
-          const browser = await launchBrowser();
+          const browser = await getBrowser();
           try {
             const page = await browser.newPage();
             await page.goto(`https://www.bing.com/search?q=${encodeURIComponent(q)}`, { waitUntil: "networkidle2", timeout: 15000 });
@@ -1476,6 +1543,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         try {
           const entries = await readdir(dir, { withFileTypes: true });
           for (const entry of entries) {
+            if (['node_modules', '.git', 'dist', '.lmstudio'].includes(entry.name)) continue;
             const fullPath = join(dir, entry.name);
             if (entry.isDirectory()) {
               await scan(fullPath, currentDepth + 1);
@@ -2162,6 +2230,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         let endpoint = pluginConfig.get("secondaryAgentEndpoint");
         let modelId = pluginConfig.get("secondaryModelId");
         const useMainModel = pluginConfig.get("useMainModelForSubAgent");
+        let handoffMessage: string | undefined = undefined;
+        let finalResponse = "";
 
         if (useMainModel) {
           endpoint = "http://localhost:1234/v1";
@@ -2304,9 +2374,21 @@ Always assume relative paths are from this directory.`;
                 console.log(`[Sub-Agent] Parse result source=${parsedMessage.toolCallSource} hasToolCall=${Boolean(toolCall)} preview=${preview}`);
               }
 
+              // Always capture the latest content as the finalContent candidate
+              finalContent = content;
+
               if (!toolsEnabled) {
                 const extracted = extractHandoffMessage(content);
-                return { response: extracted.response, filesModified, handoff_message: extracted.handoffMessage };
+                // If the only output is a bare tool-call JSON (model tried to use tools it wasn't
+                // given), substitute a clear failure message rather than leaking raw JSON.
+                const looksLikePureToolCall =
+                  extracted.response.trimStart().startsWith("{") &&
+                  parsedMessage.toolCall !== null &&
+                  extracted.response.trim().length < 500;
+                const safeResponse = looksLikePureToolCall
+                  ? "[Sub-agent did not produce a prose response. It attempted a tool call but tools are disabled for this invocation.]"
+                  : extracted.response;
+                return { response: safeResponse, filesModified, handoff_message: extracted.handoffMessage };
               }
 
               const trimmed = content.trim();
@@ -2329,7 +2411,30 @@ Always assume relative paths are from this directory.`;
                 executedToolCallCount++;
                 msgList.push({ role: "assistant", content: content });
                 let toolResult = "";
+                let toolValidationError: string | null = null;
+
+                // --- Parameter Validation Helper ---
+                const validateRequiredParams = (toolName: string, requiredParams: string[], providedArgs: Record<string, any> = {}): string | null => {
+                  const missing = requiredParams.filter(p => !(p in providedArgs));
+                  if (missing.length > 0) {
+                    const availableKeys = Object.keys(providedArgs).join(", ") || "none";
+                    return `Tool '${toolName}' requires parameters: [${requiredParams.join(", ")}]. Missing: [${missing.join(", ")}]. Provided keys: ${availableKeys}.`;
+                  }
+                  return null;
+                };
+
                 try {
+                  // --- Early Parameter Validation (catches wrong param names + absolute paths) ---
+                  const args = toolCall.args || {};
+                  
+                  // Use shared validator to prevent duplication between prod and tests
+                  toolValidationError = validateToolCall(toolCall.tool, args);
+                  
+                  // If validation failed, return error immediately so subagent can retry
+                  if (toolValidationError) {
+                    toolResult = `TOOL_VALIDATION_ERROR: ${toolValidationError}`;
+                  } else {
+
                   // --- File System ---
                   if (allowFileSystem) {
                     if (toolCall.tool === "read_file" && toolCall.args?.file_name) {
@@ -2560,6 +2665,8 @@ Always assume relative paths are from this directory.`;
                   }
 
                   if (!toolResult) toolResult = "Error: Tool not found/allowed.";
+                  } // Close the else { block from validation check
+
                 } catch (err: any) { toolResult = `Error: ${err.message}`; }
 
                 msgList.push({ role: "user", content: `Tool Output: ${toolResult}` });
@@ -2627,7 +2734,6 @@ Always assume relative paths are from this directory.`;
                   !planningLikeText;
 
                 if (content.includes("TASK_COMPLETED") || shouldTreatAsFinalResponse || loops >= loopLimit - 1) {
-                  finalContent = content;
                   break; // Done
                 } else {
                   noToolCallCount++;
@@ -2803,8 +2909,9 @@ Always assume relative paths are from this directory.`;
         const primaryResult = await runAgentLoop(agent_role, task, context, 8, false, currentWorkingDirectory);
         if (primaryResult.error) return { error: primaryResult.error };
 
-        let finalResponse = primaryResult.response || "";
-        let handoffMessage: string | undefined = primaryResult.handoff_message;
+        finalResponse = primaryResult.response || "";
+        handoffMessage = primaryResult.handoff_message;
+        const generatedFiles = [...primaryResult.filesModified];
 
         // --- 2. Auto-Debug Loop ---
         if (debugMode && primaryResult.filesModified.length > 0) {
@@ -2852,18 +2959,550 @@ Always assume relative paths are from this directory.`;
           }
         }
 
-        // Always hide code blocks if the setting is disabled, regardless of file saving status
-        if (!showFullCode) {
+        // Only hide code blocks when files were actually saved.
+        // If nothing was written to disk, leave the raw response intact so the primary agent
+        // can see what the sub-agent actually did (or didn't do) rather than being misled
+        // by a false "code has been handled" success message.
+        if (!showFullCode && primaryResult.filesModified.length > 0) {
           finalResponse = finalResponse.replace(/```[\s\S]*?```/g, "\n[System: Code Block Hidden for Brevity. The code has been handled/saved by the sub-agent. Do NOT request it again. Proceed.]\n");
         }
 
-        return { response: finalResponse, generated_files: primaryResult.filesModified, handoff_message: handoffMessage };
+        return { response: finalResponse, generated_files: generatedFiles, handoff_message: handoffMessage };
       },
       enableSecondary,
       "consult_secondary_agent"
     )
   });
   tools.push(consultSecondaryAgentTool);
+
+
+  // --- Issue #13: Enhanced File Editing Tools ---
+
+  const insertAtLineTool = tool({
+    name: "insert_at_line",
+    description: text`
+      Insert content at a specific line number in a file. 
+      The line_number is 1-indexed (line 1 is the first line).
+      Existing content at that line and below will be pushed down.
+    `,
+    parameters: {
+      file_name: z.string(),
+      line_number: z.number().int().min(1).describe("The line number to insert at (1-indexed)"),
+      content_to_insert: z.string().describe("The text content to insert at the specified line"),
+    },
+    implementation: async ({ file_name, line_number, content_to_insert }) => {
+      try {
+        const filePath = validatePath(currentWorkingDirectory, file_name);
+        let content = "";
+        try {
+          content = await readFile(filePath, "utf-8");
+        } catch {
+          if (line_number !== 1) {
+            return { error: `File '${file_name}' does not exist. Can only insert at line 1 in a new file.` };
+          }
+        }
+        
+        const lines = content.split("\n");
+        const insertIndex = Math.min(line_number - 1, lines.length);
+        lines.splice(insertIndex, 0, content_to_insert);
+        
+        await writeFile(filePath, lines.join("\n"), "utf-8");
+        return { 
+          success: true, 
+          message: `Inserted ${content_to_insert.split('\n').length} line(s) at line ${line_number} in ${file_name}`,
+          new_line_count: lines.length 
+        };
+      } catch (e) {
+        return { error: `Failed to insert text: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    },
+  });
+  tools.push(insertAtLineTool);
+
+  const appendFileTool = tool({
+    name: "append_file",
+    description: text`
+      Append content to the end of a file. 
+      If the file doesn't exist, it will be created.
+      Useful for adding logs, entries, or building files incrementally.
+    `,
+    parameters: {
+      file_name: z.string(),
+      content: z.string().describe("The text content to append to the file"),
+    },
+    implementation: async ({ file_name, content }) => {
+      try {
+        const filePath = validatePath(currentWorkingDirectory, file_name);
+        await mkdir(dirname(filePath), { recursive: true });
+        await appendFile(filePath, content, "utf-8");
+        return { 
+          success: true, 
+          message: `Content appended to ${file_name}` 
+        };
+      } catch (e) {
+        return { error: `Failed to append to file: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    },
+  });
+  tools.push(appendFileTool);
+
+  const readFileRangeTool = tool({
+    name: "read_file_range",
+    description: text`
+      Read a specific range of lines from a file. 
+      Returns the content with line numbers for easy reference.
+      Line numbers are 1-indexed (line 1 is the first line).
+    `,
+    parameters: {
+      file_name: z.string(),
+      start_line: z.number().int().min(1).describe("Starting line number (1-indexed)"),
+      end_line: z.number().int().min(1).describe("Ending line number (1-indexed, inclusive)"),
+    },
+    implementation: async ({ file_name, start_line, end_line }) => {
+      try {
+        const filePath = validatePath(currentWorkingDirectory, file_name);
+        const content = await readFile(filePath, "utf-8");
+        const lines = content.split("\n");
+        
+        if (start_line > lines.length) {
+          return { error: `Start line ${start_line} is beyond the end of the file (${lines.length} lines)` };
+        }
+        
+        const actualEndLine = Math.min(end_line, lines.length);
+        const selectedLines = lines.slice(start_line - 1, actualEndLine);
+        
+        const numberedContent = selectedLines.map((line, idx) => 
+          `${start_line + idx}: ${line}`
+        ).join("\n");
+        
+        return {
+          file_name: file_name,
+          start_line: start_line,
+          end_line: actualEndLine,
+          line_count: selectedLines.length,
+          content_with_line_numbers: numberedContent,
+        };
+      } catch (e) {
+        return { error: `Failed to read file range: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    },
+  });
+  tools.push(readFileRangeTool);
+
+  const searchInFileTool = tool({
+    name: "search_in_file",
+    description: text`
+      Search for a pattern within a single file (grep-like functionality).
+      Returns matching lines with their line numbers.
+      The pattern can be a simple substring or a regex pattern.
+    `,
+    parameters: {
+      file_name: z.string(),
+      pattern: z.string().describe("Search pattern (substring or regex)"),
+      case_sensitive: z.boolean().optional().default(false).describe("Whether the search is case-sensitive (default: false)"),
+      use_regex: z.boolean().optional().default(false).describe("Whether to treat pattern as a regex (default: false, treats as literal substring)"),
+    },
+    implementation: async ({ file_name, pattern, case_sensitive = false, use_regex = false }) => {
+      try {
+        const filePath = validatePath(currentWorkingDirectory, file_name);
+        const content = await readFile(filePath, "utf-8");
+        const lines = content.split("\n");
+        
+        let matches: Array<{ line_number: number; content: string }> = [];
+        
+        for (let i = 0; i < lines.length; i++) {
+          let line = lines[i];
+          let searchPattern = pattern;
+          
+          if (!case_sensitive) {
+            line = line.toLowerCase();
+            searchPattern = pattern.toLowerCase();
+          }
+          
+          let isMatch = false;
+          if (use_regex) {
+            try {
+              const regex = new RegExp(searchPattern);
+              isMatch = regex.test(line);
+            } catch (e) {
+              return { error: `Invalid regex pattern: ${e instanceof Error ? e.message : String(e)}` };
+            }
+          } else {
+            isMatch = line.includes(searchPattern);
+          }
+          
+          if (isMatch) {
+            matches.push({
+              line_number: i + 1,
+              content: lines[i],
+            });
+          }
+        }
+        
+        return {
+          file_name: file_name,
+          pattern: pattern,
+          match_count: matches.length,
+          matches: matches.slice(0, 100),
+          note: matches.length > 100 ? `Showing first 100 of ${matches.length} matches` : undefined,
+        };
+      } catch (e) {
+        return { error: `Failed to search file: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    },
+  });
+  tools.push(searchInFileTool);
+
+
+  const deleteLinesInFileTool = tool({
+    name: "delete_lines_in_file",
+    description: text`
+      Delete a specific line or range of lines from a file.
+      Line numbers are 1-indexed (line 1 is the first line).
+      If end_line is omitted, only start_line will be deleted.
+    `,
+    parameters: {
+      file_name: z.string(),
+      start_line: z.number().int().min(1).describe("The starting line number to delete (1-indexed)"),
+      end_line: z.number().int().min(1).optional().describe("Optional: The ending line number to delete (inclusive). If omitted, only deletes start_line."),
+    },
+    implementation: async ({ file_name, start_line, end_line }) => {
+      try {
+        const filePath = validatePath(currentWorkingDirectory, file_name);
+        let content = "";
+        try {
+          content = await readFile(filePath, "utf-8");
+        } catch {
+          return { error: `File '${file_name}' does not exist.` };
+        }
+
+        const lines = content.split("\n");
+        const actualEndLine = end_line ?? start_line;
+
+        if (start_line > lines.length) {
+          return { error: `Start line ${start_line} is beyond the end of the file (${lines.length} lines)` };
+        }
+
+        const deleteCount = Math.min(actualEndLine - start_line + 1, lines.length - start_line + 1);
+        
+        if (deleteCount <= 0) {
+          return { error: `Invalid line range. End line must be >= Start line.` };
+        }
+
+        lines.splice(start_line - 1, deleteCount);
+
+        await writeFile(filePath, lines.join("\n"), "utf-8");
+        return { 
+          success: true, 
+          message: `Deleted ${deleteCount} line(s) (lines ${start_line}-${actualEndLine}) from ${file_name}`,
+          new_line_count: lines.length 
+        };
+      } catch (e) {
+        return { error: `Failed to delete lines: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    },
+  });
+  tools.push(deleteLinesInFileTool);
+
+  if (allowGitHubTools) {
+  // --- GitHub CLI (gh) Tools ---
+  
+  const checkGhInstalled = async (): Promise<boolean | string> => {
+    try {
+      const cmd = process.platform === 'win32' ? 'where gh' : 'which gh';
+      const child = spawn(cmd, [], { shell: true });
+      await new Promise((resolve) => child.on('close', resolve));
+      return true;
+    } catch (e) {
+      return "GitHub CLI ('gh') is not installed. Please ask the user to install it from https://cli.github.com/";
+    }
+  };
+
+  const ghAuthTool = tool({
+    name: "gh_auth",
+    description: "Check GitHub authentication status. If not authenticated, opens a terminal window for the user to sign in.",
+    parameters: {},
+    implementation: async () => {
+      const isInstalled = await checkGhInstalled();
+      if (typeof isInstalled === 'string') return { error: isInstalled };
+
+      try {
+        // Check status first
+        const statusChild = spawn("gh auth status", [], { shell: true });
+        let stderr = "";
+        statusChild.stderr.on("data", d => stderr += d);
+        await new Promise((resolve) => statusChild.on('close', resolve));
+
+        if (statusChild.exitCode === 0) {
+          return { success: true, message: "Already authenticated with GitHub." };
+        } else {
+          // Open terminal for login
+          const escapedDir = currentWorkingDirectory.replace(/"/g, '""');
+          const shellCommand = `start "" /D "${escapedDir}" cmd.exe /k "gh auth login --git-protocol=https & exit"`;
+          spawn("cmd.exe", ["/c", shellCommand], { detached: true, stdio: "ignore" });
+          return { success: true, message: "Opened a terminal window for GitHub authentication. Please sign in there." };
+        }
+      } catch (e) {
+        return { error: `Auth check failed: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    },
+  });
+  tools.push(ghAuthTool);
+
+  const ghCreateIssueTool = tool({
+    name: "gh_create_issue",
+    description: "Create a new GitHub issue in the current repository.",
+    parameters: {
+      title: z.string(),
+      body: z.string().optional(),
+      labels: z.array(z.string()).optional(),
+    },
+    implementation: async ({ title, body, labels }) => {
+      const isInstalled = await checkGhInstalled();
+      if (typeof isInstalled === 'string') return { error: isInstalled };
+
+      try {
+        let tempFilePath = "";
+        const ghArgs = ["issue", "create", "--title", title];
+        
+        if (body) {
+          tempFilePath = join(currentWorkingDirectory, `gh_issue_body_${Date.now()}.md`);
+          await writeFile(tempFilePath, body, "utf-8");
+          ghArgs.push("--body-file", tempFilePath);
+        }
+
+        if (labels) {
+          for (const label of labels) {
+            ghArgs.push("-l", label);
+          }
+        }
+        
+        const child = spawn("gh", ghArgs);
+        let stdout = "", stderr = "";
+        child.stdout.on("data", d => stdout += d);
+        child.stderr.on("data", d => stderr += d);
+        await new Promise((resolve) => child.on('close', resolve));
+
+        if (tempFilePath) await rm(tempFilePath, { force: true });
+
+        if (child.exitCode === 0) return { success: true, url: stdout.trim() };
+        return { error: `Failed to create issue: ${stderr}` };
+      } catch (e) {
+        return { error: `Create issue failed: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    },
+  });
+  tools.push(ghCreateIssueTool);
+
+  const ghListIssuesTool = tool({
+    name: "gh_list_issues",
+    description: "List issues in the current repository.",
+    parameters: {
+      state: z.enum(["open", "closed"]).optional().default("open"),
+      labels: z.array(z.string()).optional(),
+      limit: z.number().min(1).max(50).optional().default(10),
+    },
+    implementation: async ({ state, labels, limit }) => {
+      const isInstalled = await checkGhInstalled();
+      if (typeof isInstalled === 'string') return { error: isInstalled };
+
+      try {
+        const ghArgs = ["issue", "list", "--state", state, "--limit", String(limit), "--json", "number,title,state,url,labels"];
+        if (labels) {
+          for (const label of labels) {
+            ghArgs.push("-l", label);
+          }
+        }
+        
+        const child = spawn("gh", ghArgs);
+        let stdout = "", stderr = "";
+        child.stdout.on("data", d => stdout += d);
+        child.stderr.on("data", d => stderr += d);
+        await new Promise((resolve) => child.on('close', resolve));
+
+        if (child.exitCode === 0) {
+          try { return { issues: JSON.parse(stdout) }; } 
+          catch { return { error: "Failed to parse issue list output" }; }
+        }
+        return { error: `List issues failed: ${stderr}` };
+      } catch (e) {
+        return { error: `List issues failed: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    },
+  });
+  tools.push(ghListIssuesTool);
+
+  const ghViewCommentsTool = tool({
+    name: "gh_view_comments",
+    description: "View comments on a specific issue or pull request.",
+    parameters: {
+      number: z.number().describe("The issue or PR number"),
+      type: z.enum(["issue", "pr"]).default("issue").describe("Whether it's an issue or a pull request"),
+    },
+    implementation: async ({ number, type }) => {
+      const isInstalled = await checkGhInstalled();
+      if (typeof isInstalled === 'string') return { error: isInstalled };
+
+      try {
+        // Fallback to standard gh command for reliable JSON parsing of comments
+        const ghArgs = type === "issue" 
+          ? ["issue", "view", String(number), "--json", "comments"]
+          : ["pr", "view", String(number), "--json", "comments"];
+
+        const child = spawn("gh", ghArgs);
+        let stdout = "", stderr = "";
+        child.stdout.on("data", d => stdout += d);
+        child.stderr.on("data", d => stderr += d);
+        await new Promise((resolve) => child.on('close', resolve));
+
+        if (child.exitCode === 0) {
+          try { 
+            const data = JSON.parse(stdout);
+            return { comments: data.comments || [] }; 
+          } catch { return { raw_output: stdout }; }
+        }
+        return { error: `View comments failed: ${stderr}` };
+      } catch (e) {
+        return { error: `View comments failed: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    },
+  });
+  tools.push(ghViewCommentsTool);
+
+  const ghCreatePrTool = tool({
+    name: "gh_create_pr",
+    description: "Create a new pull request in the current repository.",
+    parameters: {
+      title: z.string(),
+      body: z.string().optional(),
+      head_branch: z.string().describe("The branch containing your changes"),
+      base_branch: z.string().default("main").describe("The branch you want to merge into (e.g., main, master)"),
+    },
+    implementation: async ({ title, body, head_branch, base_branch }) => {
+      const isInstalled = await checkGhInstalled();
+      if (typeof isInstalled === 'string') return { error: isInstalled };
+
+      try {
+        let tempFilePath = "";
+        const ghArgs = ["pr", "create", "--title", title, "--head", head_branch, "--base", base_branch];
+        
+        if (body) {
+          tempFilePath = join(currentWorkingDirectory, `gh_pr_body_${Date.now()}.md`);
+          await writeFile(tempFilePath, body, "utf-8");
+          ghArgs.push("--body-file", tempFilePath);
+        }
+
+        const child = spawn("gh", ghArgs);
+        let stdout = "", stderr = "";
+        child.stdout.on("data", d => stdout += d);
+        child.stderr.on("data", d => stderr += d);
+        await new Promise((resolve) => child.on('close', resolve));
+
+        if (tempFilePath) await rm(tempFilePath, { force: true });
+
+        if (child.exitCode === 0) return { success: true, url: stdout.trim() };
+        return { error: `Failed to create PR: ${stderr}` };
+      } catch (e) {
+        return { error: `Create PR failed: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    },
+  });
+  tools.push(ghCreatePrTool);
+
+  const ghListPrsTool = tool({
+    name: "gh_list_prs",
+    description: "List pull requests in the current repository.",
+    parameters: {
+      state: z.enum(["open", "closed"]).optional().default("open"),
+      limit: z.number().min(1).max(50).optional().default(10),
+    },
+    implementation: async ({ state, limit }) => {
+      const isInstalled = await checkGhInstalled();
+      if (typeof isInstalled === 'string') return { error: isInstalled };
+
+      try {
+        const ghArgs = ["pr", "list", "--state", state, "--limit", String(limit), "--json", "number,title,state,url,headRefName,baseRefName"];
+        
+        const child = spawn("gh", ghArgs);
+        let stdout = "", stderr = "";
+        child.stdout.on("data", d => stdout += d);
+        child.stderr.on("data", d => stderr += d);
+        await new Promise((resolve) => child.on('close', resolve));
+
+        if (child.exitCode === 0) {
+          try { return { pull_requests: JSON.parse(stdout) }; } 
+          catch { return { error: "Failed to parse PR list output" }; }
+        }
+        return { error: `List PRs failed: ${stderr}` };
+      } catch (e) {
+        return { error: `List PRs failed: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    },
+  });
+  tools.push(ghListPrsTool);
+
+  const ghViewPrDiffTool = tool({
+    name: "gh_view_pr_diff",
+    description: "Fetch the diff/patch of a specific pull request.",
+    parameters: {
+      number: z.number().describe("The PR number"),
+    },
+    implementation: async ({ number }) => {
+      const isInstalled = await checkGhInstalled();
+      if (typeof isInstalled === 'string') return { error: isInstalled };
+
+      try {
+        const ghArgs = ["pr", "diff", String(number)];
+        
+        const child = spawn("gh", ghArgs);
+        let stdout = "", stderr = "";
+        child.stdout.on("data", d => stdout += d);
+        child.stderr.on("data", d => stderr += d);
+        await new Promise((resolve) => child.on('close', resolve));
+
+        if (child.exitCode === 0) {
+          return { diff: stdout.substring(0, 50000) + (stdout.length > 50000 ? "\n... (truncated)" : "") };
+        }
+        return { error: `Fetch PR diff failed: ${stderr}` };
+      } catch (e) {
+        return { error: `Fetch PR diff failed: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    },
+  });
+  tools.push(ghViewPrDiffTool);
+
+  const ghPushTool = tool({
+    name: "gh_push",
+    description: "Push local commits to the remote GitHub repository.",
+    parameters: {
+      branch: z.string().optional().describe("Optional: The branch to push. Defaults to current branch."),
+    },
+    implementation: async ({ branch }) => {
+      const isInstalled = await checkGhInstalled();
+      if (typeof isInstalled === 'string') return { error: isInstalled };
+
+      try {
+        const gitArgs = ["push", "origin"];
+        if (branch) gitArgs.push(branch);
+        
+        const child = spawn("git", gitArgs);
+        let stdout = "", stderr = "";
+        child.stdout.on("data", d => stdout += d);
+        child.stderr.on("data", d => stderr += d);
+        await new Promise((resolve) => child.on('close', resolve));
+
+        if (child.exitCode === 0) return { success: true, message: "Pushed successfully." };
+        return { error: `Git push failed: ${stderr}` };
+      } catch (e) {
+        return { error: `Git push failed: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    },
+  });
+  tools.push(ghPushTool);
+
+} // End of if (allowGitHubTools)
+
+
 
   return tools;
 }

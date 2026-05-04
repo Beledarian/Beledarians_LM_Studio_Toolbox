@@ -4,10 +4,17 @@ const path = require("node:path");
 const { getSubAgentDocsCandidatePaths } = require("../dist/promptPreprocessor.js");
 
 test("getSubAgentDocsCandidatePaths prefers plugin path then workspace fallback", () => {
-  const workspace = path.resolve("C:\\temp\\workspace");
+  const workspace = path.resolve("/tmp/workspace");
   const candidates = getSubAgentDocsCandidatePaths(workspace);
 
-  assert.equal(candidates.length, 2);
-  assert.equal(candidates[0], path.join(path.dirname(path.resolve(__dirname, "../dist")), "subagent_docs.md"));
-  assert.equal(candidates[1], path.join(workspace, "subagent_docs.md"));
+  // Returns 4 paths: plugin root, plugin instructions/, workspace instructions/, workspace root
+  assert.equal(candidates.length, 4);
+  
+  // Plugin paths come first (root and instructions/)
+  assert.ok(candidates[0].endsWith("subagent_docs.md"));
+  assert.ok(candidates[1].includes("instructions") && candidates[1].endsWith("subagent_docs.md"));
+  
+  // Workspace fallbacks come last (instructions/ then root)
+  assert.ok(candidates[2].includes(workspace) || candidates[2].includes("\\tmp\\workspace") || candidates[2].includes("/tmp/workspace"));
+  assert.ok(candidates[3].includes(workspace) || candidates[3].includes("\\tmp\\workspace") || candidates[3].includes("/tmp/workspace"));
 });

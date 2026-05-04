@@ -25,6 +25,23 @@
 - **run_in_terminal**: Open a new terminal window.
 - **run_test_command**: Run tests (npm test, etc.).
 
+
+### Git Operations (Requires Configuration)
+- **git_status**: Get current git status.
+- **git_diff**: Get git diff for repo or specific files.
+- **git_commit**: Commit staged changes.
+- **git_log**: Get recent commit history.
+- **git_add**: Stage specific files or all changes.
+- **git_checkout**: Switch to an existing branch or create/switch to a new one.
+
+### GitHub CLI Tools (Requires Configuration & `gh` installed)
+- **gh_auth**: Check auth status; opens terminal login window if needed.
+- **gh_create_issue** / **gh_create_pr**: Create issues/PRs securely using temp files for long bodies.
+- **gh_list_issues** / **gh_list_prs**: List open/closed items with filtering (labels, state).
+- **gh_view_comments**: Fetch comment threads for specific issues or PRs.
+- **gh_view_pr_diff**: Fetch the diff/patch of a specific pull request.
+- **gh_push**: Push local commits to the remote repository.
+
 ### Web & RAG
 - **web_search**: Search the web with no-key fallback providers (DuckDuckGo API/fetch/browser, Google, Bing).
 - **fetch_web_content**: Get clean text from a URL.

@@ -3,5 +3,5 @@
   "runner": "node",
   "owner": "beledarian",
   "name": "beledarians-lm-studio-tools",
-  "revision": 2
+  "revision": 3
 }

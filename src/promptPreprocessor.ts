@@ -12,12 +12,15 @@ import { dirname, join } from "path";
 import { pluginConfigSchematics } from "./config";
 import { TOOLS_DOCUMENTATION } from "./toolsDocumentation";
 import { getPersistedState, savePersistedState } from "./stateManager";
+import { getDict } from "./locales/i18n";
 
 type DocumentContextInjectionStrategy = "none" | "inject-full-content" | "retrieval";
 
 export function getSubAgentDocsCandidatePaths(currentWorkingDirectory: string): string[] {
   return [
     join(dirname(__dirname), "subagent_docs.md"),
+    join(dirname(__dirname), "instructions", "subagent_docs.md"),
+    join(currentWorkingDirectory, "instructions", "subagent_docs.md"),
     join(currentWorkingDirectory, "subagent_docs.md"),
   ];
 }
@@ -81,25 +84,60 @@ export async function promptPreprocessor(ctl: PromptPreprocessorController, user
   const frequency = pluginConfig.get("subAgentFrequency");
   const debugMode = pluginConfig.get("enableDebugMode");
 
+  // Layer 2: resolve runtime dictionary from user-selected language
+  const messageLanguage = pluginConfig.get("messageLanguage");
+  const rt = getDict(messageLanguage).runtime;
+
+  // Persist uiLanguageOverride to state file so i18n.ts can read it synchronously on next boot.
+  const uiLanguageOverride = pluginConfig.get("uiLanguageOverride");
+  try {
+    const state = await getPersistedState(defaultWorkspacePath);
+    if (state.uiLanguageOverride !== uiLanguageOverride) {
+      state.uiLanguageOverride = uiLanguageOverride;
+      await savePersistedState(state);
+      ctl.debug(`[i18n] uiLanguageOverride saved: "${uiLanguageOverride}". Restart the plugin to apply the new UI language.`);
+    }
+  } catch (e) {
+    ctl.debug("[i18n] Failed to persist uiLanguageOverride.", e);
+  }
+
+  // --- Plan Mode Instructions ---
+  const planMode = pluginConfig.get("planMode");
+  
+  let planHint = "";
+  
+  if (planMode === "always") {
+      planHint = rt.planHintAlways;
+  } else if (planMode === "when_useful") {
+      planHint = rt.planHintWhenUseful;
+  }
+
+
   let delegationHint = "";
 
   if (frequency === "always") {
-      delegationHint = "\n\n**SYSTEM MANDATE:** You MUST delegate ALL information retrieval, news summaries, and **ALL coding tasks** (creation, editing, refactoring) to the secondary agent. Do NOT write code or use search tools yourself. Use `consult_secondary_agent` with `allow_tools: true`.\n\n**PRE-DELEGATION CHECKLIST:**\n1. Run `list_directory` to see what files already exist.\n2. Read `beledarian_info.md` or `README.md` if present.\n3. CALL `consult_secondary_agent` with the context.";
+      delegationHint = rt.delegationHintAlways;
   } else if (frequency === "when_useful") {
-      delegationHint = "\n\n**SYSTEM ADVICE:** For complex tasks (e.g., 'create an app', 'refactor this module', 'research and summarize'), you **MUST** delegate to the secondary agent using `consult_secondary_agent` (set `allow_tools: true`).\n\n**Why Delegate?**\n- The Sub-Agent has a specialized loop for coding and debugging.\n- It will automatically SAVE all files. You do not need to do it.\n\n**How to Delegate:**\n1. Gather context (`list_directory`, `read_file`).\n2. Call `consult_secondary_agent` with a clear task description and the context you found.\n";
+      delegationHint = rt.delegationHintWhenUseful;
       
       if (debugMode) {
-          delegationHint += "Note: 'Auto-Debug' is ACTIVE. The Sub-Agent will verify and fix its own code. This is the safest way to generate code.\n";
+          delegationHint += rt.delegationHintWhenUsefulDebug;
       }
 
   } else if (frequency === "hard_tasks") {
-      delegationHint = "\n\n**Delegation Hint:** Only delegate EXTREMELY complex or computationally expensive tasks to the secondary agent. Handle standard queries and file reads yourself.\n";
+      delegationHint = rt.delegationHintHardTasks;
   }
 
   // Append the hint to the user message (effective system instruction for this turn)
   if (delegationHint) {
       currentContent += delegationHint;
   }
+
+  // Append plan hint if enabled
+  if (planHint) {
+      currentContent += planHint;
+  }
+
 
   // --- Sub-Agent Documentation Injection (Startup OR On-Enable) ---
   const enableSecondary = pluginConfig.get("enableSecondaryAgent");
@@ -146,20 +184,52 @@ export async function promptPreprocessor(ctl: PromptPreprocessorController, user
 
     try {
         const { currentWorkingDirectory } = state;
-        const startupPath = join(currentWorkingDirectory, "startup.md");
-        const startupContent = await readFile(startupPath, "utf-8");
-        const filesToRead = startupContent.split('\n').map(f => f.trim()).filter(f => f);
+        const candidateStartupPaths = [
+            join(currentWorkingDirectory, ".beledarian", "startup.md"),
+            join(currentWorkingDirectory, "instructions", "startup.md"),
+            join(currentWorkingDirectory, "startup.md"),
+        ];
 
-        for (const file of filesToRead) {
-            const filePath = join(currentWorkingDirectory, file);
+        let startupContent = "";
+        let usedStartupPath = "";
+        for (const startupPath of candidateStartupPaths) {
             try {
-                const fileContent = await readFile(filePath, "utf-8");
-                if (fileContent.trim().length > 0) {
-                    injectionContent = `\n\n---\n\n${fileContent}\n\n---\n\n${injectionContent}`;
-                    ctl.debug(`${file} loaded and injected into context.`);
-                }
+                startupContent = await readFile(startupPath, "utf-8");
+                usedStartupPath = dirname(startupPath);
+                ctl.debug(`startup.md loaded from: ${startupPath}`);
+                break;
             } catch (e) {
-                ctl.debug(`Failed to load ${file} from startup.md.`);
+                // Keep trying
+            }
+        }
+
+        if (startupContent) {
+            const filesToRead = startupContent.split('\n').map(f => f.trim()).filter(f => f);
+
+            for (const file of filesToRead) {
+                // Try relative to startup.md folder first, then relative to CWD
+                const candidateFilePaths = [
+                    join(usedStartupPath, file),
+                    join(currentWorkingDirectory, file),
+                ];
+
+                let loaded = false;
+                for (const filePath of candidateFilePaths) {
+                    try {
+                        const fileContent = await readFile(filePath, "utf-8");
+                        if (fileContent.trim().length > 0) {
+                            injectionContent = `\n\n---\n\n${fileContent}\n\n---\n\n${injectionContent}`;
+                            ctl.debug(`${file} loaded and injected into context from ${filePath}.`);
+                            loaded = true;
+                            break;
+                        }
+                    } catch (e) {
+                        // Keep trying
+                    }
+                }
+                if (!loaded) {
+                    ctl.debug(`Failed to load ${file} from startup.md.`);
+                }
             }
         }
     } catch (e) {
@@ -202,9 +272,14 @@ async function prepareRetrievalResultsContextInjection(
 
   const statusSteps = new Map<FileHandle, PredictionProcessStatusController>();
 
+  // Layer 2: resolve runtime dict for status messages
+  const rtRetrieve = getDict(
+    ctl.getPluginConfig(pluginConfigSchematics).get("messageLanguage")
+  ).runtime;
+
   const retrievingStatus = ctl.createStatus({
     status: "loading",
-    text: `Loading an embedding model for retrieval...`,
+    text: rtRetrieve.statusLoadingEmbeddingModel,
   });
   // Using the same model as rag-v1
   const model = await ctl.client.embedding.model("nomic-ai/nomic-embed-text-v1.5-GGUF", {
@@ -212,7 +287,7 @@ async function prepareRetrievalResultsContextInjection(
   });
   retrievingStatus.setState({
     status: "loading",
-    text: `Retrieving relevant citations for user query...`,
+    text: rtRetrieve.statusRetrievingCitations,
   });
   const result = await ctl.client.files.retrieve(originalUserPrompt, files, {
     embeddingModel: model,
@@ -260,37 +335,28 @@ async function prepareRetrievalResultsContextInjection(
     // show status
     retrievingStatus.setState({
       status: "done",
-      text: `Retrieved ${numRetrievals} relevant citations for user query`,
+      text: rtRetrieve.statusRetrievedCitations(numRetrievals),
     });
     ctl.debug("Retrieval results", result);
     // add results to prompt
-    const prefix = "The following citations were found in the files provided by the user:\n\n";
-    processedContent += prefix;
+    processedContent += rtRetrieve.citationPrefix;
     let citationNumber = 1;
     result.entries.forEach(result => {
       const completeText = result.content;
-      processedContent += `Citation ${citationNumber}: "${completeText}"\n\n`;
+      processedContent += rtRetrieve.citationEntry(citationNumber, completeText);
       citationNumber++;
     });
     await ctl.addCitations(result);
-    const suffix =
-      "Use the citations above to respond to the user query, only if they are relevant. " +
-      `Otherwise, respond to the best of your ability without them.` +
-      `\n\nUser Query:\n\n${originalUserPrompt}`;
-    processedContent += suffix;
+    processedContent += rtRetrieve.citationSuffix(originalUserPrompt);
   } else {
     // retrieval occured but no relevant citations found
     retrievingStatus.setState({
       status: "canceled",
-      text: `No relevant citations found for user query`,
+      text: rtRetrieve.statusNoRelevantCitations,
     });
     ctl.debug("No relevant citations found for user query");
-    const noteAboutNoRetrievalResultsFound =
-      "Important: No citations were found in the user files for the user query. " +
-      `In less than one sentence, inform the user of this. ` +
-      `Then respond to the query to the best of your ability.`;
     processedContent =
-      noteAboutNoRetrievalResultsFound + `\n\nUser Query:\n\n${originalUserPrompt}`;
+      rtRetrieve.noRelevantCitationsNote + `\n\nUser Query:\n\n${originalUserPrompt}`;
   }
   ctl.debug("Processed content", processedContent);
 
@@ -318,15 +384,19 @@ async function prepareDocumentContextInjection(
 
   let formattedFinalUserPrompt = "";
 
+  // Layer 2: resolve runtime dict for document injection strings
+  const rtDoc = getDict(
+    ctl.getPluginConfig(pluginConfigSchematics).get("messageLanguage")
+  ).runtime;
+
   if (documentInjectionSnippets.size > 0) {
-    formattedFinalUserPrompt +=
-      "This is a Enriched Context Generation scenario.\n\nThe following content was found in the files provided by the user.\n";
+    formattedFinalUserPrompt += rtDoc.documentInjectionHeader;
 
     for (const [fileHandle, snippet] of documentInjectionSnippets) {
-      formattedFinalUserPrompt += `\n\n** ${fileHandle.name} full content **\n\n${snippet}\n\n** end of ${fileHandle.name} **\n\n`;
+      formattedFinalUserPrompt += rtDoc.documentInjectionFileBlock(fileHandle.name, snippet);
     }
 
-    formattedFinalUserPrompt += `Based on the content above, please provide a response to the user query.\n\nUser query: ${input.getText()}`;
+    formattedFinalUserPrompt += rtDoc.documentInjectionSuffix(input.getText());
   }
 
   input.replaceText(formattedFinalUserPrompt);
@@ -352,9 +422,14 @@ async function chooseContextInjectionStrategy(
   originalUserPrompt: string,
   files: Array<FileHandle>,
 ): Promise<DocumentContextInjectionStrategy> {
+  // Layer 2: runtime dict for strategy-choice status messages
+  const rtStrategy = getDict(
+    ctl.getPluginConfig(pluginConfigSchematics).get("messageLanguage")
+  ).runtime;
+
   const status = ctl.createStatus({
     status: "loading",
-    text: `Deciding how to handle the document(s)...`,
+    text: rtStrategy.statusDecidingStrategy,
   });
 
   const model = await ctl.client.llm.model();
@@ -385,7 +460,7 @@ async function chooseContextInjectionStrategy(
 
     const loadingStatus = status.addSubStatus({
       status: "loading",
-      text: `Loading parser for ${file.name}...`,
+      text: rtStrategy.statusLoadingParser(file.name),
     });
     let actionProgressing = "Reading";
     let parserIndicator = "";
@@ -455,7 +530,7 @@ async function chooseContextInjectionStrategy(
     );
     status.setState({
       status: "done",
-      text: `Chosen context injection strategy: '${chosenStrategy}'. Retrieval is optimal for the size of content provided`,
+      text: rtStrategy.statusStrategyChosen(chosenStrategy, "Retrieval is optimal for the size of content provided"),
     });
     return chosenStrategy;
   }
@@ -463,7 +538,7 @@ async function chooseContextInjectionStrategy(
   const chosenStrategy = "inject-full-content";
   status.setState({
     status: "done",
-    text: `Chosen context injection strategy: '${chosenStrategy}'. All content can fit into the context`,
+    text: rtStrategy.statusStrategyChosen(chosenStrategy, "All content can fit into the context"),
   });
   return chosenStrategy;
 }

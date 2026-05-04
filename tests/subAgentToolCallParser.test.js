@@ -79,3 +79,82 @@ test("parses tool call from reasoning_content when content is empty", () => {
   assert.equal(parsed.toolCall.tool, "read_file");
   assert.equal(parsed.toolCall.args.file_name, "C:\\temp\\note.txt");
 });
+
+test("strips Thought: block with single newline separator", () => {
+  const parsed = parseSubAgentResponseMessage({
+    content: "Thought: This is reasoning\nActual response here",
+  });
+
+  assert.ok(!parsed.content.startsWith("Thought:"), "Should strip Thought: even without blank line");
+});
+
+test("strips Thought: block with no separator at end of string", () => {
+  const parsed = parseSubAgentResponseMessage({
+    content: "Thought: incomplete reasoning at end",
+  });
+
+  assert.ok(!parsed.content.startsWith("Thought:"), "Should strip incomplete Thought: block");
+});
+
+test("strips Thought for N seconds with single newline", () => {
+  const parsed = parseSubAgentResponseMessage({
+    content: "Thought for 2.5 seconds\nThe answer is 42",
+  });
+
+  assert.ok(!parsed.content.startsWith("Thought"), "Should strip thought preamble");
+  assert.ok(parsed.content.includes("42"), "Should preserve actual response");
+});
+
+test("handles mixed Thought: and tool call parsing", () => {
+  const parsed = parseSubAgentResponseMessage({
+    content: "Thought: Let me save this file\n\n{\"file_name\": \"test.txt\", \"content\": \"hello\"}",
+  });
+
+  assert.equal(parsed.toolCall.tool, "save_file");
+  assert.ok(!parsed.content.startsWith("Thought:"), "Should strip thought block");
+});
+
+test("strips <antThinking> tags from content", () => {
+  const parsed = parseSubAgentResponseMessage({
+    content: "<antThinking>i now have good information about Weinsberg</antThinking>The city has approximately 20,000 inhabitants.",
+  });
+
+  assert.ok(!parsed.content.includes("<antThinking>"), "Should strip antThinking tags");
+  assert.ok(parsed.content.includes("Weinsberg") === false || parsed.content.startsWith("The city"), "Should remove thinking content");
+});
+
+test("strips <thinking> tags from content", () => {
+  const parsed = parseSubAgentResponseMessage({
+    content: "<thinking>Let me analyze this request</thinking>The answer is 42.",
+  });
+
+  assert.ok(!parsed.content.includes("<thinking>"), "Should strip thinking tags");
+  assert.ok(parsed.content.includes("42"), "Should preserve actual response");
+});
+
+test("strips <antThinking> tags and parses tool call from remaining content", () => {
+  const parsed = parseSubAgentResponseMessage({
+    content: "<antThinking>I need to save this file</antThinking>{\"file_name\": \"output.txt\", \"content\": \"hello world\"}",
+  });
+
+  assert.equal(parsed.toolCall.tool, "save_file");
+  assert.ok(!parsed.content.includes("<antThinking>"), "Should strip antThinking tags");
+});
+
+test("handles nested or multiple <antThinking> tags", () => {
+  const parsed = parseSubAgentResponseMessage({
+    content: "<antThinking>first thought</antThinking>Some text<antThinking>second thought</antThinking>Final response.",
+  });
+
+  assert.ok(!parsed.content.includes("<antThinking>"), "Should strip all antThinking tags");
+  assert.ok(parsed.content.includes("Final response"), "Should preserve actual content");
+});
+
+test("strips <thinking> tags with attributes", () => {
+  const parsed = parseSubAgentResponseMessage({
+    content: "<thinking type=\"reasoning\">Analyzing the problem...</thinking>The solution is to use recursion.",
+  });
+
+  assert.ok(!parsed.content.includes("<thinking"), "Should strip thinking tags even with attributes");
+  assert.ok(parsed.content.includes("recursion"), "Should preserve actual response");
+});
