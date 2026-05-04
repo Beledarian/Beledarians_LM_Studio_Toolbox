@@ -138,6 +138,10 @@ function normalizeArgs(toolName: string, args: unknown): Record<string, any> {
     if (typeof result.name === "string" && result.file_name === undefined) {
       result.file_name = result.name;
     }
+    if (typeof fileArgs.name === "string" && fileArgs.file_name === undefined) {
+      fileArgs.file_name = fileArgs.name;
+    }
+    return fileArgs;
   }
 
   // Generic data/content normalization
@@ -145,6 +149,11 @@ function normalizeArgs(toolName: string, args: unknown): Record<string, any> {
     if (typeof result.data === "string" && result.content === undefined) {
       result.content = result.data;
     }
+    if (typeof saveArgs.name === "string" && saveArgs.file_name === undefined) {
+      saveArgs.file_name = saveArgs.name;
+    }
+    if (typeof saveArgs.data === "string" && saveArgs.content === undefined) {
+      saveArgs.content = saveArgs.data;
     if (toolName === "insert_at_line" && typeof result.content === "string" && result.content_to_insert === undefined) {
       result.content_to_insert = result.content;
     }
@@ -178,7 +187,7 @@ function isMatchingBracket(open: string, close: string): boolean {
 function extractBalancedJsonSnippets(text: string, maxSnippets = 12): string[] {
   const snippets: string[] = [];
   let iterations = 0;
-  const MAX_ITERATIONS = 500000;
+  const MAX_ITERATIONS = 1000000;
 
   for (let start = 0; start < text.length; start++) {
     if (iterations > MAX_ITERATIONS) break;
@@ -191,7 +200,7 @@ function extractBalancedJsonSnippets(text: string, maxSnippets = 12): string[] {
     let invalid = false;
 
     // Limit the lookahead to prevent O(N^2) event loop blocking
-    const endLimit = Math.min(text.length, start + 30000);
+    const endLimit = Math.min(text.length, start + 100000);
 
     for (let end = start + 1; end < endLimit; end++) {
       iterations++;
@@ -394,6 +403,26 @@ function parseToolCallObject(candidate: unknown, originalText: string): ParsedTo
 
   if ("tool" in candidate && "parameters" in candidate) {
     const parsed = buildToolCall(candidate.tool, candidate.parameters);
+    if (parsed) return parsed;
+  }
+
+  // Support for { "function": "...", "parameters": {...} } format used by some Anthropic-compatible APIs and fine-tuned models
+  if ("function" in candidate && "parameters" in candidate) {
+    let args: unknown = candidate.parameters;
+    if (typeof args === "string") {
+      args = tryParseJson(args) ?? {};
+    }
+    const parsed = buildToolCall(candidate.function, args);
+    if (parsed) return parsed;
+  }
+
+  // Support for { "function": "...", "arguments": {...} } format variant
+  if ("function" in candidate && "arguments" in candidate) {
+    let args: unknown = candidate.arguments;
+    if (typeof args === "string") {
+      args = tryParseJson(args) ?? {};
+    }
+    const parsed = buildToolCall(candidate.function, args);
     if (parsed) return parsed;
   }
 

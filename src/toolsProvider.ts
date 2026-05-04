@@ -839,26 +839,54 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
       output this full path to the user.
     `,
     parameters: {
-      file_name: z.string(),
-      content: z.string(),
+      file_name: z.string().optional(),
+      content: z.string().optional(),
+      files: z.array(z.object({ file_name: z.string(), content: z.string() })).optional().describe("For saving multiple files at once. E.g. [{file_name: 'a.txt', content: 'hello'}]"),
     },
-    implementation: async ({ file_name, content }) => {
+    implementation: async ({ file_name, content, files }) => {
+
+      const filesToSave = Array.isArray(files) ? files : [];
+      if (file_name && content) {
+        filesToSave.push({ file_name, content });
+      }
+
+      if (filesToSave.length === 0) {
+        return { error: "Must provide either file_name and content, or a files array." };
+      }
+
+      const savedPaths: string[] = [];
+      const errors: string[] = [];
+
+      for (const file of filesToSave) {
 
       // Validate filename
-      if (!file_name || file_name.trim().length === 0) {
-        return { error: "Filename cannot be empty" };
+      if (!file.file_name || file.file_name.trim().length === 0) {
+        errors.push(`Filename cannot be empty`);
+        continue;
       }
 
       if (/[ \*\?<>|"]/.test(file_name)) {
-        return { error: "Filename contains invalid characters" };
+        errors.push("Filename " + file.file_name + " contains invalid characters");\n        continue;
       }
 
-      const filePath = validatePath(currentWorkingDirectory, file_name);
-      await mkdir(dirname(filePath), { recursive: true });
-      await writeFile(filePath, content, "utf-8");
+        try {
+          const filePath = validatePath(currentWorkingDirectory, file.file_name);
+          await mkdir(dirname(filePath), { recursive: true });
+          await writeFile(filePath, file.content, "utf-8");
+          savedPaths.push(filePath);
+        } catch (e) {
+          errors.push(`Failed to save ${file.file_name}: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+
+      if (errors.length > 0 && savedPaths.length === 0) {
+        return { error: errors.join("\n") };
+      }
+
       return {
         success: true,
-        path: filePath,
+        paths: savedPaths,
+        errors: errors.length > 0 ? errors : undefined,
       };
     },
   });
@@ -2419,7 +2447,7 @@ Always assume relative paths are from this directory.`;
             if (allowedTools.length > 0) {
               const toolsList = allowedTools.join(", ");
               currentSystemPrompt += `\n\n## Allowed Tools\nYou have access to the following tools via JSON output: ${toolsList}.\nRefer to the "Tool Usage" section above for the JSON format.\n`;
-              toolsReminder = `\n\n[SYSTEM REMINDER: You have access to tools: ${toolsList}. If you need information you don't have, USE A TOOL. Do not refuse.]`;
+              toolsReminder = `\n\n[SYSTEM REMINDER: You have access to tools: ${toolsList}. If you need information you don't have, USE A TOOL. Do not refuse. Format tool calls exactly as: {"tool": "tool_name", "args": {"arg_name": "value"}}]`;
             }
             if (allowWeb && allowSubAgentBrowserControl && allowBrowserControl) {
               currentSystemPrompt += `\n\n## Browser Navigation Rule\nFor multi-step browsing/navigation, you MUST use browser_session_open -> browser_session_control -> browser_session_close.\nUse browser_open_page only for one-shot page reads.`;
@@ -2641,6 +2669,8 @@ Always assume relative paths are from this directory.`;
 
 
               if (subAgentDebugLogging) {
+                const rawContent = (typeof message === "string" ? message : JSON.stringify(message)) ?? "";
+                console.log(`[Sub-Agent] RAW content received: ${rawContent.substring(0, 1000)}...`);
                 const preview = content.substring(0, 200);
                 console.log(`[Sub-Agent] Iteration ${loops + 1}: toolCall=${Boolean(toolCall)}, source=${parsedMessage.toolCallSource}, noToolCalls=${noToolCallCount}, preview=${preview}`);
               }
