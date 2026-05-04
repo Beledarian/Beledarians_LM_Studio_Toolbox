@@ -80,4 +80,15 @@ Since this project uses **TypeScript**, please adhere to the following:
 * **Clarity:** Variable and function names should be self-explanatory.
 * **Formatting:** If available, run the linter/formatter before committing.
 
+## Questions?
+
+Open an issue or start a discussion. I'm happy to help!
+
+## License
+
+By contributing to this project you agree that any of your contributions will be licensed under the [MIT License](LICENSE-MIT). This is the same license as the project itself.
+
+Any contribution submitted for inclusion in this project by you shall be licensed as above, without any additional terms or conditions.
+
+
 Thank you for your contributions!
