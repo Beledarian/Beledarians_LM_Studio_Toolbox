@@ -22,6 +22,12 @@ This project is a plugin for [LM Studio](https://lmstudio.ai/) that provides a r
 > **Find this project helpful?** Consider [giving it a ⭐ on GitHub](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox) or [contributing!](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox/tree/main?tab=contributing-ov-file) Thank you for using the toolbox.
 
 
+### Recent Updates (v1.3.1)
+
+- **🌍 Full Internationalization (i18n):** Added complete UI and runtime support for **English**, **German**, **Simplified Chinese**, and **Traditional Chinese**.
+- **🌐 Dual-Layer Translation:** Supports both "Config UI" (static) and "Agent Messages" (dynamic runtime) languages.
+- **🔄 UI Language Override:** Added a field to manually force the Config UI into a specific locale for testing, bypassing OS-level detection on the next plugin restart.
+
 ### Recent Updates (v1.3.0)
 
 - **🐙 Native GitHub CLI Tools:** Added `gh_auth`, `gh_create_issue`, `gh_list_issues`, `gh_view_comments`, `gh_create_pr`, `gh_list_prs`, `gh_view_pr_diff`, and `gh_push` for secure, structured GitHub interactions without generic shell commands
@@ -29,14 +35,14 @@ This project is a plugin for [LM Studio](https://lmstudio.ai/) that provides a r
 - **⚙️ New Sidebar Toggle:** Added "Allow GitHub CLI Tools" setting to enable/disable `gh_*` tools independently
 - **🛡️ Dependency Guards:** All CLI tools now verify installation before execution and provide clear prompts if missing
 
-### Recent Updates (v1.2.0)
+<details>
+<summary><strong>Older Updates (v1.2.x & earlier)</strong></summary>
+
+### v1.2.0
 
 - **🛡️ Sub-Agent Tool Validation:** Added early parameter validation with clear error messages to prevent silent failures when sub-agents use wrong parameter names or absolute paths outside workspace
 - **🧪 Regression Tests:** Added 14 new tests for tool call validation logic (total: 51 tests)
 - **💬 Better Error Feedback:** Sub-agents now receive `TOOL_VALIDATION_ERROR` messages with helpful hints about correct parameter names vs common mistakes
-
-<details>
-<summary><strong>v1.1.x & Earlier Changes</strong></summary>
 
 ### v1.1.1 (2026-04-08)
 **Browser Reliability and Navigation Context**
