@@ -74,6 +74,11 @@ export const zhCN: LocaleDict = {
       subtitle:
         "🔴 主开关：覆盖上述各项设置，一键启用所有代码/命令执行工具。",
     },
+    protectedPaths: {
+      displayName: "受保护路径",
+      subtitle:
+        "要禁止所有操作的盘符或路径列表（例如 D:\\、C:\\Windows）。每行一个。",
+    },
     searchApiKey: {
       displayName: "搜索 API 密钥",
       subtitle:

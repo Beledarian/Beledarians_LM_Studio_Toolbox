@@ -87,6 +87,12 @@ export const pluginConfigSchematics = createConfigSchematics()
     subtitle: c.allowAllCode.subtitle,
   }, false)
 
+  // ── Safety: Protected Paths ─────────────────────────────────────────────────
+  .field("protectedPaths", "string", {
+    displayName: c.protectedPaths.displayName,
+    subtitle: c.protectedPaths.subtitle,
+  }, "")
+
   // ── Search / Embedding ─────────────────────────────────────────────────────
   .field("searchApiKey", "string", {
     displayName: c.searchApiKey.displayName,

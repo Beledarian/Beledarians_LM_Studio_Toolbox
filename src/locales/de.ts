@@ -62,6 +62,10 @@ export const de: LocaleDict = {
       displayName: "Alle Codeausführung erlauben",
       subtitle: "HAUPTSCHALTER: Überschreibt alle anderen Einstellungen und aktiviert ALLE Ausführungstools.",
     },
+    protectedPaths: {
+      displayName: "Geschützte Pfade",
+      subtitle: "Liste der Laufwerke oder Pfade, für die alle Vorgänge blockiert werden sollen (z. B. D:\\, C:\\Windows). Eine pro Zeile.",
+    },
     searchApiKey: {
       displayName: "Such-API-Schlüssel",
       subtitle: "Optionaler API-Schlüssel für Suchdienste zur Vermeidung von Rate-Limits.",
