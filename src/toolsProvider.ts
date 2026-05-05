@@ -890,6 +890,10 @@ tools.push(listDirectoryTool);
   });
   tools.push(readFileTool);
 
+
+
+
+  
   const originalExecuteCommandImplementation = async ({ command, input, timeout_seconds }: { command: string; input?: string; timeout_seconds?: number }) => {
     const childProcess = spawn(command, [], {
       cwd: currentWorkingDirectory,
@@ -940,6 +944,10 @@ tools.push(listDirectoryTool);
     };
   };
 
+
+
+
+  
   const executeCommandTool = tool({
     name: "execute_command",
     description: text`
@@ -981,6 +989,10 @@ tools.push(listDirectoryTool);
   });
   tools.push(makeDirectoryTool);
 
+
+
+
+  
   const deletePathTool = tool({
     name: "delete_path",
     description: "Delete a file or directory in the current working directory. Be careful!",
@@ -1038,6 +1050,10 @@ tools.push(listDirectoryTool);
   });
   tools.push(deleteFilesByPatternTool);
 
+
+
+
+  
   const originalRunInTerminalImplementation = async ({ command }: { command: string }) => {
     if (process.platform === "win32") {
 
@@ -1102,6 +1118,10 @@ tools.push(listDirectoryTool);
     };
   };
 
+
+
+
+  
   const runInTerminalTool = tool({
     name: "run_in_terminal",
     description: text`
@@ -1120,6 +1140,10 @@ tools.push(listDirectoryTool);
   });
   tools.push(runInTerminalTool);
 
+
+
+
+  
   const webSearchTool = tool({
     name: "web_search",
     description: "Search the web using multiple providers (DuckDuckGo, Google, Bing). Uses no-key providers first, then browser providers as fallback.",
@@ -1396,6 +1420,10 @@ tools.push(listDirectoryTool);
   });
   tools.push(webSearchTool);
 
+
+
+
+  
   const moveFileTool = tool({
     name: "move_file",
     description: "Move or rename a file or directory.",
@@ -1416,6 +1444,10 @@ tools.push(listDirectoryTool);
   });
   tools.push(moveFileTool);
 
+
+
+
+  
   const copyFileTool = tool({
     name: "copy_file",
     description: "Copy a file to a new location.",
@@ -1458,6 +1490,10 @@ tools.push(listDirectoryTool);
   });
   tools.push(fetchWebContentTool);
 
+
+
+
+  
   const ragWebContentTool = tool({
     name: "rag_web_content",
     description: "Fetch content from a URL, and then use RAG to find and return only the text chunks most relevant to a specific query.",
@@ -1491,25 +1527,46 @@ tools.push(listDirectoryTool);
   });
   tools.push(ragWebContentTool);
 
+
+
+
+
+  //version_SINAPSAIC of 2026.05.05:
   const getSystemInfoTool = tool({
     name: "get_system_info",
     description: "Get information about the system (OS, CPU, Memory).",
     parameters: {},
     implementation: async () => {
       return {
+        //OS:
         platform: os.platform(),
         arch: os.arch(),
         release: os.release(),
         hostname: os.hostname(),
+        //CPU:
+        cpus: os.cpus().length,
+        cpu_count: cpus.length,
+        cpu_model: cpus[0]?.model,
+        cpu_speed_mhz: cpus[0]?.speed,
+        //memory:
         total_memory: os.totalmem(),
         free_memory: os.freemem(),
-        cpus: os.cpus().length,
         node_version: process.version,
+        //network:
+        network_interfaces: os2.networkInterfaces(),
+        //user and environment:
+        current_user: os2.userInfo().username,
+        home_dir: os2.homedir(),
+        temp_dir: os2.tmpdir(),
       };
     },
   });
   tools.push(getSystemInfoTool);
 
+
+
+
+  
   const findFilesTool = tool({
     name: "find_files",
     description: "Find files recursively in the current directory matching a name pattern.",
@@ -1551,6 +1608,10 @@ tools.push(listDirectoryTool);
   });
   tools.push(findFilesTool);
 
+
+
+
+  
   const fuzzyFindLocalFilesTool = tool({
     name: "fuzzy_find_local_files",
     description: "Fuzzy find local files by path/name similarity using Levenshtein scoring.",
@@ -1587,6 +1648,10 @@ tools.push(listDirectoryTool);
   });
   tools.push(fuzzyFindLocalFilesTool);
 
+
+
+
+  
   const getFileMetadataTool = tool({
     name: "get_file_metadata",
     description: "Get metadata (size, dates) for a specific file.",
@@ -1612,6 +1677,10 @@ tools.push(listDirectoryTool);
   });
   tools.push(getFileMetadataTool);
 
+
+
+
+  
   const readClipboardTool = tool({
     name: "read_clipboard",
     description: "Read text content from the system clipboard.",
@@ -1660,6 +1729,10 @@ tools.push(listDirectoryTool);
   });
   tools.push(readClipboardTool);
 
+
+
+
+  
   const writeClipboardTool = tool({
     name: "write_clipboard",
     description: "Write text content to the system clipboard.",
@@ -1719,6 +1792,10 @@ tools.push(listDirectoryTool);
   });
   tools.push(writeClipboardTool);
 
+
+
+
+  
   const openFileTool = tool({
     name: "open_file",
     description: "Open a file or URL in the system's default application. Use this to preview images, PDFs, or open web pages.",
