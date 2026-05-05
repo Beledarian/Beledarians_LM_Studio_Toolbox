@@ -2964,33 +2964,34 @@ Always assume relative paths are from this directory.`;
                 }
 
                 // Check for explicit completion phrase or strict loop limit
-                const planningLikeText = /(?:\bI(?:'ll| will)\b|\blet me\b|\bnext\b|\bfirst\b)/i.test(trimmed);
-                const shouldTreatAsFinalResponse =
-                  executedToolCallCount > 0 &&
-                  trimmed.length >= 120 &&
-                  !planningLikeText;
+                 const planningLikeText = /(?:\bI(?:'ll| will)\b|\blet me\b|\bnext\b|\bfirst\b)/i.test(trimmed);
+                 const shouldTreatAsFinalResponse =
+                   trimmed.length >= 120 &&
+                   !planningLikeText;
 
-                if (content.includes("TASK_COMPLETED") || shouldTreatAsFinalResponse || loops >= loopLimit - 1) {
-                  break; // Done
-                } else {
-                  noToolCallCount++;
-                  if (content.trim().length > 0) {
-                    msgList.push({ role: "assistant", content: content });
-                  }
+                 // Increment no-tool counter
+                 noToolCallCount++;
 
-                  let reminder = "SYSTEM NOTICE: You did not call a tool. If you are finished, output 'TASK_COMPLETED'. If not, USE A TOOL now and return a single JSON tool-call object only (no prose).";
-                  if (toolsEnabled) {
-                    if (allowFileSystem && suggestedReadPath && noToolCallCount <= 3) {
-                      const escapedPath = suggestedReadPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-                      reminder += `\nSuggested next step: {"tool":"read_file","args":{"file_name":"${escapedPath}"}}`;
-                    } else if (allowFileSystem && noToolCallCount <= 3) {
-                      reminder += `\nSuggested next step: {"tool":"list_directory","args":{}}`;
-                    }
-                  }
+                 if (content.includes("TASK_COMPLETED") || shouldTreatAsFinalResponse || noToolCallCount >= 3 || loops >= loopLimit - 1) {
+                   break; // Done
+                 }
 
-                  msgList.push({ role: "system", content: reminder });
-                  loops++;
-                }
+                 if (content.trim().length > 0) {
+                   msgList.push({ role: "assistant", content: content });
+                 }
+
+                 let reminder = "SYSTEM NOTICE: You did not call a tool. If you are finished, output 'TASK_COMPLETED'. If not, USE A TOOL now and return a single JSON tool-call object only (no prose).";
+                 if (toolsEnabled) {
+                   if (allowFileSystem && suggestedReadPath && noToolCallCount <= 3) {
+                     const escapedPath = suggestedReadPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+                     reminder += `\nSuggested next step: {"tool":"read_file","args":{"file_name":"${escapedPath}"}}`;
+                   } else if (allowFileSystem && noToolCallCount <= 3) {
+                     reminder += `\nSuggested next step: {"tool":"list_directory","args":{}}`;
+                   }
+                 }
+
+                 msgList.push({ role: "system", content: reminder });
+                 loops++;
               }
             } catch (err: any) { return { error: err.message, filesModified }; }
 
