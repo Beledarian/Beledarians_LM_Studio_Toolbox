@@ -16,9 +16,35 @@ import { validateToolCall } from "./toolCallValidator";
 import type { Browser, Page } from "puppeteer";
 
 // --- Security Helper ---
+let protectedPathsList: string[] = [];
+
+function setProtectedPaths(configValue: string) {
+  protectedPathsList = configValue
+    .split("\n")
+    .map(p => p.trim().replace(/\/$/, "").toLowerCase())
+    .filter(p => p.length > 0);
+}
+
+function isPathProtected(requestedPath: string): boolean {
+  if (protectedPathsList.length === 0) return false;
+  const lowerPath = requestedPath.toLowerCase();
+  const absolute = resolve("/", lowerPath);
+  for (const protectedPath of protectedPathsList) {
+    const absProtected = resolve("/", protectedPath);
+    if (absolute.startsWith(absProtected)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function validatePath(baseDir: string, requestedPath: string): string {
   const resolved = resolve(baseDir, requestedPath);
   
+  if (isPathProtected(resolved)) {
+    throw new Error(`Access Denied: Path '${resolved}' is in a protected zone.`);
+  }
+
   // Use relative pathing to ensure the resolved path stays within baseDir
   const rel = relative(baseDir, resolved);
   if (rel.startsWith("..") || isAbsolute(rel)) {
@@ -138,6 +164,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
   const enableLocalRag = pluginConfig.get("enableLocalRag");
   const enableSecondary = pluginConfig.get("enableSecondaryAgent");
   const embeddingModelName = pluginConfig.get("embeddingModel");
+  const protectedPaths = pluginConfig.get("protectedPaths") as string || "";
+  setProtectedPaths(protectedPaths);
   // const searchApiKey = pluginConfig.get("searchApiKey"); // Used inside tool
 
   // Master override
@@ -833,6 +861,14 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
   tools.push(readFileTool);
 
   const originalExecuteCommandImplementation = async ({ command, input, timeout_seconds }: { command: string; input?: string; timeout_seconds?: number }) => {
+    if (protectedPathsList.length > 0) {
+      const cmdLower = command.toLowerCase();
+      for (const pp of protectedPathsList) {
+        if (cmdLower.includes(pp)) {
+          return { stdout: "", stderr: `Command blocked: '${command}' references protected path '${pp}'.` };
+        }
+      }
+    }
     const childProcess = spawn(command, [], {
       cwd: currentWorkingDirectory,
       shell: true,

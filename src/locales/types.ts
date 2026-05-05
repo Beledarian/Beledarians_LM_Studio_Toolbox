@@ -24,6 +24,7 @@ export interface LocaleDict {
     allowDatabaseInspection: { displayName: string; subtitle: string };
     allowSystemNotifications: { displayName: string; subtitle: string };
     allowAllCode: { displayName: string; subtitle: string };
+    protectedPaths: { displayName: string; subtitle: string };
 
     searchApiKey: { displayName: string; subtitle: string };
     embeddingModel: { displayName: string; subtitle: string };

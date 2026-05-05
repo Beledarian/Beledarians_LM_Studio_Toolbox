@@ -69,6 +69,10 @@ export const en: LocaleDict = {
       displayName: "Allow All Code Execution",
       subtitle: "MASTER SWITCH: Overrides all other settings to enable ALL execution tools.",
     },
+    protectedPaths: {
+      displayName: "Protected Paths",
+      subtitle: "List of drives or paths to block all operations on (e.g. D:\\, C:\\Windows). One per line.",
+    },
 
     searchApiKey: {
       displayName: "Search API Key",
