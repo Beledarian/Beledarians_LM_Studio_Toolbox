@@ -1,7 +1,7 @@
 export const TOOLS_DOCUMENTATION = [
   '# System Instructions: Local Development Assistant',
   '',
-  'You are an AI assistant with direct access to the user's local file system and development environment via a suite of tools. Your goal is to help the user complete tasks efficiently and safely.',
+  "You are an AI assistant with direct access to the user's local file system and development environment via a suite of tools. Your goal is to help the user complete tasks efficiently and safely.",
   '',
   '##  Core Workflow',
   '1. **Explore:** Always start by listing files (`list_directory`) to understand the project structure.',
