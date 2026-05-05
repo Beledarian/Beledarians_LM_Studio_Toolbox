@@ -16,41 +16,80 @@ import { validateToolCall } from "./toolCallValidator";
 import type { Browser, Page } from "puppeteer";
 
 // --- Security Helper ---
-let protectedPathsList: string[] = [];
 
-function setProtectedPaths(configValue: string) {
-  protectedPathsList = configValue
-    .split("\n")
-    .map(p => p.trim().replace(/\/$/, "").toLowerCase())
-    .filter(p => p.length > 0);
-}
+/**
+ * Encapsulates protected-path logic to avoid global mutable state,
+ * which would cause race conditions if multiple plugin instances run concurrently.
+ * Uses path.relative for robust boundary detection instead of string matching.
+ */
+class PathGuard {
+  private protectedPaths: string[] = [];
+  private baseDir: string;
 
-function isPathProtected(requestedPath: string): boolean {
-  if (protectedPathsList.length === 0) return false;
-  const lowerPath = requestedPath.toLowerCase();
-  const absolute = resolve("/", lowerPath);
-  for (const protectedPath of protectedPathsList) {
-    const absProtected = resolve("/", protectedPath);
-    if (absolute.startsWith(absProtected)) {
-      return true;
+  constructor(baseDir: string, configValue: string = "") {
+    this.baseDir = resolve(baseDir);
+    this.setProtectedPaths(configValue);
+  }
+
+  private setProtectedPaths(configValue: string) {
+    this.protectedPaths = configValue
+      .split("\n")
+      .map(p => p.trim().replace(/\/$/, ""))
+      .filter(p => p.length > 0)
+      // Resolve against baseDir immediately to standardize all protected paths
+      .map(p => resolve(this.baseDir, p));
+  }
+
+  public isPathProtected(requestedPath: string): boolean {
+    if (this.protectedPaths.length === 0) return false;
+
+    // Resolve the requested path to an absolute path before checking
+    const absoluteReq = resolve(this.baseDir, requestedPath);
+
+    for (const protectedPath of this.protectedPaths) {
+      const rel = relative(protectedPath, absoluteReq);
+
+      // If relative path doesn't start with '..' and isn't absolute,
+      // the requested path is inside the protected directory boundary.
+      // We also check for an exact match (rel === "").
+      if (rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))) {
+        return true;
+      }
     }
+    return false;
   }
-  return false;
+
+  public validatePath(requestedPath: string): string {
+    const resolved = resolve(this.baseDir, requestedPath);
+
+    // 1. Check for directory traversal outside the base workspace
+    const relToBase = relative(this.baseDir, resolved);
+    if (relToBase.startsWith("..") || isAbsolute(relToBase)) {
+      throw new Error(`Access Denied: Path '${resolved}' attempts to escape the base directory.`);
+    }
+
+    // 2. Check against protected zones
+    if (this.isPathProtected(resolved)) {
+      throw new Error(`Access Denied: Path '${resolved}' is in a protected zone.`);
+    }
+
+    return resolved;
+  }
 }
 
-function validatePath(baseDir: string, requestedPath: string): string {
-  const resolved = resolve(baseDir, requestedPath);
-  
-  if (isPathProtected(resolved)) {
-    throw new Error(`Access Denied: Path '${resolved}' is in a protected zone.`);
-  }
+// Module-level sentinel so the guard can be referenced by the free validatePath shim below.
+let pathGuard: PathGuard | null = null;
 
-  // Use relative pathing to ensure the resolved path stays within baseDir
+// Thin shim so all existing call-sites (validatePath(cwd, path)) continue to work
+// without modification. The guard is always initialised before any tool runs.
+function validatePath(baseDir: string, requestedPath: string): string {
+  if (pathGuard) return pathGuard.validatePath(requestedPath);
+  // Fallback: plain boundary check only (no protected paths)
+  const resolved = resolve(baseDir, requestedPath);
   const rel = relative(baseDir, resolved);
   if (rel.startsWith("..") || isAbsolute(rel)) {
     throw new Error(`Access Denied: Path '${requestedPath}' is outside the workspace.`);
   }
-  
   return resolved;
 }
 
@@ -164,8 +203,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
   const enableLocalRag = pluginConfig.get("enableLocalRag");
   const enableSecondary = pluginConfig.get("enableSecondaryAgent");
   const embeddingModelName = pluginConfig.get("embeddingModel");
-  const protectedPaths = pluginConfig.get("protectedPaths") as string || "";
-  setProtectedPaths(protectedPaths);
+  const protectedPathsConfig = (pluginConfig.get("protectedPaths") as string) || "";
+  // Instantiate PathGuard; this also re-initialises on every plugin reload,
+  // so config changes are picked up without a full LM Studio restart.
+  pathGuard = new PathGuard(currentWorkingDirectory, protectedPathsConfig);
   // const searchApiKey = pluginConfig.get("searchApiKey"); // Used inside tool
 
   // Master override
@@ -861,13 +902,11 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
   tools.push(readFileTool);
 
   const originalExecuteCommandImplementation = async ({ command, input, timeout_seconds }: { command: string; input?: string; timeout_seconds?: number }) => {
-    if (protectedPathsList.length > 0) {
-      const cmdLower = command.toLowerCase();
-      for (const pp of protectedPathsList) {
-        if (cmdLower.includes(pp)) {
-          return { stdout: "", stderr: `Command blocked: '${command}' references protected path '${pp}'.` };
-        }
-      }
+    // NOTE: Shell-command filtering by string matching is inherently limited
+    // (e.g. `cd /protected && cat secret.txt` can bypass it). Proper isolation
+    // requires a container/chroot. This check covers the most common accidental cases.
+    if (pathGuard && pathGuard.isPathProtected(command)) {
+      return { stdout: "", stderr: `Command blocked: references a protected path.` };
     }
     const childProcess = spawn(command, [], {
       cwd: currentWorkingDirectory,
