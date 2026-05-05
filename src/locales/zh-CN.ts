@@ -77,7 +77,7 @@ export const zhCN: LocaleDict = {
     protectedPaths: {
       displayName: "受保护路径",
       subtitle:
-        "要禁止所有操作的盘符或路径列表（例如 D:\\、C:\\Windows）。每行一个。",
+        "要禁止所有操作的盘符或路径列表（例如 D:\\、C:\\Windows）。每行一个。⚠️ Shell 命令无法通过路径匹配完全拦截——此功能作为防护屏障使用，而非安全边界。",
     },
     searchApiKey: {
       displayName: "搜索 API 密钥",

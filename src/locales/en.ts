@@ -71,7 +71,7 @@ export const en: LocaleDict = {
     },
     protectedPaths: {
       displayName: "Protected Paths",
-      subtitle: "List of drives or paths to block all operations on (e.g. D:\\, C:\\Windows). One per line.",
+      subtitle: "List of drives or paths to block all file/shell operations on (e.g. D:\\, C:\\Windows). One per line. ⚠️ Shell commands cannot be fully blocked by path matching — use this as a safeguard, not a security boundary.",
     },
 
     searchApiKey: {
