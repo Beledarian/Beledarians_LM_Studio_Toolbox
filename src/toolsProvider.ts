@@ -835,22 +835,30 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
   });
   tools.push(replaceTextTool);
 
-  const listDirectoryTool = tool({
-    name: "list_directory",
-    description: "List the files and directories in the current working directory or a specified subdirectory.",
-    parameters: {
-      path: z.string().optional().describe("The path to the directory to list. Defaults to current working directory."),
-    },
-    implementation: async ({ path }) => {
-      const targetPath = path ? validatePath(currentWorkingDirectory, path) : currentWorkingDirectory;
-      const files = await readdir(targetPath);
-      return {
-        files,
-      };
-    },
-  });
-  tools.push(listDirectoryTool);
 
+
+
+  
+//version_SINAPSAIC of 2026.05.05:
+const listDirectoryTool = tool({
+  name: "list_directory",
+  description:
+    "List files and directories in the current working directory or a specified subdirectory.",
+  parameters: {
+    path: z.string().optional().describe("Directory path (defaults to current working directory)"),
+  },
+  implementation: async ({ path }) => ({
+    files: await readdir(
+      path ? validatePath(currentWorkingDirectory, path) : currentWorkingDirectory
+    ),
+  }),
+});
+tools.push(listDirectoryTool);
+
+
+
+
+  
   const readFileTool = tool({
     name: "read_file",
     description: "Read the content of a file in the current working directory.",
