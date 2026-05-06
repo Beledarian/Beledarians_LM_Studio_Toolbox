@@ -64,7 +64,7 @@ export const zhTW: LocaleDict = {
     },
     protectedPaths: {
       displayName: "受保護路徑",
-      subtitle: "要禁止所有操作的磁碟機或路徑列表（例如 D:\\、C:\\Windows）。每行一個。",
+      subtitle: "要禁止所有操作的磁碟機或路徑列表（例如 D:\\、C:\\Windows）。每行一個。⚠️ Shell 指令無法透過路徑比對完全攔截——請將此功能視為防護措施，而非安全邊界。",
     },
     searchApiKey: {
       displayName: "搜尋 API 金鑰",

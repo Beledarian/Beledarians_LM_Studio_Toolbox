@@ -64,7 +64,7 @@ export const de: LocaleDict = {
     },
     protectedPaths: {
       displayName: "Geschützte Pfade",
-      subtitle: "Liste der Laufwerke oder Pfade, für die alle Vorgänge blockiert werden sollen (z. B. D:\\, C:\\Windows). Eine pro Zeile.",
+      subtitle: "Liste der Laufwerke oder Pfade, für die alle Vorgänge blockiert werden sollen (z. B. D:\\, C:\\Windows). Eine pro Zeile. Shell-Befehle können durch Pfadabgleich nicht vollständig blockiert werden – als Schutzmaßnahme verwenden, nicht als Sicherheitsgrenze.",
     },
     searchApiKey: {
       displayName: "Such-API-Schlüssel",
