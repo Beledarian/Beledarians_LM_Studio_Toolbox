@@ -14,6 +14,56 @@ import { parseSubAgentResponseMessage, type ParsedToolCall } from "./subAgentToo
 import { validateToolCall } from "./toolCallValidator";
 
 import type { Browser, Page } from "puppeteer";
+import { compile } from "html-to-text";
+
+const compiledConvert = compile({
+  wordwrap: false,
+  formatters: {
+    cleanImage: function (elem, walk, builder, formatOptions) {
+      const altText = elem.attribs?.alt;
+      if (altText && altText.trim().length > 0) {
+        builder.addInline(`[Image: ${altText.trim()}]`);
+      }
+    }
+  },
+  selectors: [
+    { selector: "a", options: { ignoreHref: true } },
+    { selector: "img", format: "cleanImage" },
+    { selector: "style", format: "skip" },
+    { selector: "script", format: "skip" },
+    { selector: "noscript", format: "skip" },
+    { selector: "svg", format: "skip" },
+    { selector: "template", format: "skip" },
+    { selector: "canvas", format: "skip" },
+    { selector: "object", format: "skip" },
+    { selector: "video", format: "skip" },
+    { selector: "audio", format: "skip" },
+    { selector: "nav", format: "skip" },
+    { selector: "frame", format: "skip" },
+    { selector: "iframe", format: "skip" },
+    { selector: "form", format: "skip" },
+    { selector: "input", format: "skip" },
+    { selector: "button", format: "skip" },
+    { selector: "select", format: "skip" },
+    { selector: "aside", format: "skip" },
+  ],
+});
+
+async function fetchAndParseWebpage(url: string) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+  
+  const rawHtml = await response.text();
+  
+  const titleMatch = rawHtml.match(/<title[^>]*>([^<]+)<\/title>/i);
+  const title = titleMatch ? titleMatch[1] : undefined;
+
+  const parsedText = compiledConvert(rawHtml);
+  
+  return { text: parsedText, title, status: response.status };
+}
 
 // --- Security Helper ---
 
@@ -854,22 +904,30 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
   });
   tools.push(replaceTextTool);
 
-  const listDirectoryTool = tool({
-    name: "list_directory",
-    description: "List the files and directories in the current working directory or a specified subdirectory.",
-    parameters: {
-      path: z.string().optional().describe("The path to the directory to list. Defaults to current working directory."),
-    },
-    implementation: async ({ path }) => {
-      const targetPath = path ? validatePath(currentWorkingDirectory, path) : currentWorkingDirectory;
-      const files = await readdir(targetPath);
-      return {
-        files,
-      };
-    },
-  });
-  tools.push(listDirectoryTool);
 
+
+
+  
+//version_SINAPSAIC of 2026.05.05:
+const listDirectoryTool = tool({
+  name: "list_directory",
+  description:
+    "List files and directories in the current working directory or a specified subdirectory.",
+  parameters: {
+    path: z.string().optional().describe("Directory path (defaults to current working directory)"),
+  },
+  implementation: async ({ path }) => ({
+    files: await readdir(
+      path ? validatePath(currentWorkingDirectory, path) : currentWorkingDirectory
+    ),
+  }),
+});
+tools.push(listDirectoryTool);
+
+
+
+
+  
   const readFileTool = tool({
     name: "read_file",
     description: "Read the content of a file in the current working directory.",
@@ -901,6 +959,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
   });
   tools.push(readFileTool);
 
+
+
+
+  
   const originalExecuteCommandImplementation = async ({ command, input, timeout_seconds }: { command: string; input?: string; timeout_seconds?: number }) => {
     // NOTE: Shell-command filtering by string matching is inherently limited
     // (e.g. `cd /protected && cat secret.txt` can bypass it). Proper isolation
@@ -957,6 +1019,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     };
   };
 
+
+
+
+  
   const executeCommandTool = tool({
     name: "execute_command",
     description: text`
@@ -998,6 +1064,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
   });
   tools.push(makeDirectoryTool);
 
+
+
+
+  
   const deletePathTool = tool({
     name: "delete_path",
     description: "Delete a file or directory in the current working directory. Be careful!",
@@ -1055,6 +1125,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
   });
   tools.push(deleteFilesByPatternTool);
 
+
+
+
+  
   const originalRunInTerminalImplementation = async ({ command }: { command: string }) => {
     if (process.platform === "win32") {
 
@@ -1119,6 +1193,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     };
   };
 
+
+
+
+  
   const runInTerminalTool = tool({
     name: "run_in_terminal",
     description: text`
@@ -1137,6 +1215,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
   });
   tools.push(runInTerminalTool);
 
+
+
+
+  
   const webSearchTool = tool({
     name: "web_search",
     description: "Search the web using multiple providers (DuckDuckGo, Google, Bing). Uses no-key providers first, then browser providers as fallback.",
@@ -1413,6 +1495,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
   });
   tools.push(webSearchTool);
 
+
+
+
+  
   const moveFileTool = tool({
     name: "move_file",
     description: "Move or rename a file or directory.",
@@ -1433,6 +1519,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
   });
   tools.push(moveFileTool);
 
+
+
+
+  
   const copyFileTool = tool({
     name: "copy_file",
     description: "Copy a file to a new location.",
@@ -1461,34 +1551,11 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     },
     implementation: async ({ url }) => {
       try {
-        const response = await fetch(url);
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        let text = await response.text();
-
-        const result: any = {
-          url,
-          status: response.status,
-        };
-
-        const titleMatch = text.match(/<title[^>]*>([^<]+)<\/title>/i);
-        if (titleMatch) result.title = titleMatch[1];
-
-        const { compile } = await import("html-to-text");
-        const compiledConvert = compile({
-          wordwrap: false,
-          selectors: [
-            { selector: "a", options: { ignoreHref: true } },
-            { selector: "img", format: "skip" },
-          ],
-        });
-
-        text = compiledConvert(text);
-
-        result.content = text.substring(0, 40000) + (text.length > 40000 ? "... (truncated)" : "");
-
-        return result;
+        const { text, title, status } = await fetchAndParseWebpage(url);
+        
+        const content = text.substring(0, 40000) + (text.length > 40000 ? "... (truncated)" : "");
+        
+        return { url, status, title, content };
       } catch (error) {
         return {
           error: `Failed to fetch URL: ${error instanceof Error ? error.message : String(error)}`,
@@ -1498,6 +1565,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
   });
   tools.push(fetchWebContentTool);
 
+
+
+
+  
   const ragWebContentTool = tool({
     name: "rag_web_content",
     description: "Fetch content from a URL, and then use RAG to find and return only the text chunks most relevant to a specific query.",
@@ -1507,29 +1578,12 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     },
     implementation: async ({ url, query }) => {
       try {
-        // 1. Fetch content
-        const response = await fetch(url);
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        let text = await response.text();
-
-        const { compile } = await import("html-to-text");
-        const compiledConvert = compile({
-          wordwrap: false,
-          selectors: [
-            { selector: "a", options: { ignoreHref: true } },
-            { selector: "img", format: "skip" },
-          ],
-        });
-
-        text = compiledConvert(text);
+        const { text } = await fetchAndParseWebpage(url);
 
         if (text.length === 0) {
           return { error: "Could not extract any text from the URL." };
         }
 
-        // 3. Perform RAG
         if (!client) {
           return { error: "LM Studio Client is not available. RAG features require the client to be initialized." };
         }
@@ -1548,25 +1602,46 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
   });
   tools.push(ragWebContentTool);
 
+
+
+
+
+  //version_SINAPSAIC of 2026.05.05:
   const getSystemInfoTool = tool({
     name: "get_system_info",
     description: "Get information about the system (OS, CPU, Memory).",
     parameters: {},
     implementation: async () => {
       return {
+        //OS:
         platform: os.platform(),
         arch: os.arch(),
         release: os.release(),
         hostname: os.hostname(),
+        //CPU:
+        cpus: os.cpus().length,
+        cpu_count: cpus.length,
+        cpu_model: cpus[0]?.model,
+        cpu_speed_mhz: cpus[0]?.speed,
+        //memory:
         total_memory: os.totalmem(),
         free_memory: os.freemem(),
-        cpus: os.cpus().length,
         node_version: process.version,
+        //network:
+        network_interfaces: os2.networkInterfaces(),
+        //user and environment:
+        current_user: os2.userInfo().username,
+        home_dir: os2.homedir(),
+        temp_dir: os2.tmpdir(),
       };
     },
   });
   tools.push(getSystemInfoTool);
 
+
+
+
+  
   const findFilesTool = tool({
     name: "find_files",
     description: "Find files recursively in the current directory matching a name pattern.",
@@ -1608,6 +1683,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
   });
   tools.push(findFilesTool);
 
+
+
+
+  
   const fuzzyFindLocalFilesTool = tool({
     name: "fuzzy_find_local_files",
     description: "Fuzzy find local files by path/name similarity using Levenshtein scoring.",
@@ -1644,6 +1723,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
   });
   tools.push(fuzzyFindLocalFilesTool);
 
+
+
+
+  
   const getFileMetadataTool = tool({
     name: "get_file_metadata",
     description: "Get metadata (size, dates) for a specific file.",
@@ -1669,6 +1752,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
   });
   tools.push(getFileMetadataTool);
 
+
+
+
+  
   const readClipboardTool = tool({
     name: "read_clipboard",
     description: "Read text content from the system clipboard.",
@@ -1717,6 +1804,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
   });
   tools.push(readClipboardTool);
 
+
+
+
+  
   const writeClipboardTool = tool({
     name: "write_clipboard",
     description: "Write text content to the system clipboard.",
@@ -1776,6 +1867,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
   });
   tools.push(writeClipboardTool);
 
+
+
+
+  
   const openFileTool = tool({
     name: "open_file",
     description: "Open a file or URL in the system's default application. Use this to preview images, PDFs, or open web pages.",
