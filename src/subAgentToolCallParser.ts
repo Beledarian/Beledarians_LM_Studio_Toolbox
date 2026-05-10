@@ -138,7 +138,11 @@ function normalizeArgs(toolName: string, args: unknown): Record<string, any> {
     if (typeof result.name === "string" && result.file_name === undefined) {
       result.file_name = result.name;
     }
-  } else if (["save_file", "append_file", "insert_at_line"].includes(toolName)) {
+  }
+
+  // Generic data/content normalization (separate from fileTools check
+  // since save_file/append_file/insert_at_line need both path AND content normalization)
+  if (["save_file", "append_file", "insert_at_line"].includes(toolName)) {
     if (typeof result.data === "string" && result.content === undefined) {
       result.content = result.data;
     }
