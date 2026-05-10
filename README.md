@@ -24,14 +24,20 @@ This project is a plugin for [LM Studio](https://lmstudio.ai/) that provides a r
 > **Find this project helpful?** Consider [giving it a ⭐ on GitHub](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox) or [contributing!](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox/tree/main?tab=contributing-ov-file) Thank you for using the toolbox.
 
 
-### Recent Updates (v1.3.1)
+### Recent Updates (v1.3.2)
+
+- **🛠️ Tool Reordering & Optimization:** Reordered the tools list to prioritize casual utilities, improving agent tool selection. Upgraded the web search tool with smart Chrome detection and fallback.
+- **🤖 Sub-Agent Reliability Rework:** Overhauled the sub-agent loop to prevent infinite loops, improved tool call parsing, unified path/content normalization, and added explicit task completion/abortion capabilities (`TASK_FAILED`).
+- **✨ New Sub-Agent Tools:** Empowered sub-agents with `multi_replace_text`, `search_directory`, and background command execution. Main agents now support robust batch file saving.
+
+<details>
+<summary><strong>Older Updates (v1.3.1 & earlier)</strong></summary>
+
+### v1.3.1
 
 - **🌍 Full Internationalization (i18n):** Added complete UI and runtime support for **English**, **German**, **Simplified Chinese**, and **Traditional Chinese**.
 - **🌐 Dual-Layer Translation:** Supports both "Config UI" (static) and "Agent Messages" (dynamic runtime) languages.
 - **🔄 UI Language Override:** Added a field to manually force the Config UI into a specific locale for testing, bypassing OS-level detection on the next plugin restart.
-
-<details>
-<summary><strong>Older Updates (v1.3.0 & earlier)</strong></summary>
 
 ### v1.3.0
 

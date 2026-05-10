@@ -2570,6 +2570,8 @@ Always assume relative paths are from this directory.`;
 
           currentSystemPrompt += `\n\n## Optional Handoff Message\nIf you want the main agent to relay your findings, include either:\n1) [HANDOFF_MESSAGE]...[/HANDOFF_MESSAGE]\nOR\n2) JSON with a \`handoff_message\` field (optionally with \`response\` or \`final_response\`).`;
 
+          currentSystemPrompt += `\n\n## Task Completion & Early Exit\nIf you have successfully completed your task, output 'TASK_COMPLETED'.\nIf you cannot complete the task (e.g., due to system limitations, missing files, or inaccessible paths), output 'TASK_FAILED' to abort early.`;
+
           const msgList = [
             { role: "system", content: currentSystemPrompt },
             { role: "user", content: `Task: ${taskPrompt}\n\nContext: ${contextData}${toolsReminder}` }
@@ -2983,7 +2985,7 @@ Always assume relative paths are from this directory.`;
                  // Increment no-tool counter
                  noToolCallCount++;
 
-                 if (content.includes("TASK_COMPLETED") || shouldTreatAsFinalResponse || noToolCallCount >= 3 || loops >= loopLimit - 1) {
+                 if (content.includes("TASK_COMPLETED") || content.includes("TASK_FAILED") || shouldTreatAsFinalResponse || noToolCallCount >= 3 || loops >= loopLimit - 1) {
                    break; // Done
                  }
 
@@ -2991,7 +2993,7 @@ Always assume relative paths are from this directory.`;
                    msgList.push({ role: "assistant", content: content });
                  }
 
-                 let reminder = "SYSTEM NOTICE: You did not call a tool. If you are finished, output 'TASK_COMPLETED'. If not, USE A TOOL now and return a single JSON tool-call object only (no prose).";
+                 let reminder = "SYSTEM NOTICE: You did not call a tool. If you are finished, output 'TASK_COMPLETED'. If you cannot complete the task, output 'TASK_FAILED'. If not, USE A TOOL now and return a single JSON tool-call object only (no prose).";
                  if (toolsEnabled) {
                    if (allowFileSystem && suggestedReadPath && noToolCallCount <= 3) {
                      const escapedPath = suggestedReadPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
