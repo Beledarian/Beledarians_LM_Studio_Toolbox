@@ -1,4 +1,4 @@
-# Beledarian's LM Studio Tools
+# Beledarian's LM Studio Tools 
 
 [English](README.md) | [Deutsch](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox/blob/main/README.de.md) | [简体中文](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox/blob/main/README.zh-CN.md) | [繁體中文](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox/blob/main/README.zh-TW.md)
 
