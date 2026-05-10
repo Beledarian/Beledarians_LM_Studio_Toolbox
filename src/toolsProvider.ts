@@ -1333,12 +1333,12 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
 
   const webSearchTool = tool({
     name: "web_search",
-    description: "Search the web using multiple providers (DuckDuckGo, Google, Bing). Uses no-key providers first, then browser providers as fallback.",
+    description: "Search the web using multiple providers (DuckDuckGo, Google, Bing). Uses no-key, no-Chrome providers first, then browser providers as fallback.",
     parameters: {
       query: z.string(),
       providers: z.array(z.enum(["duckduckgo-api", "duckduckgo-fetch", "duckduckgo-html", "google", "bing"]))
         .optional()
-        .describe("Optional: List of specific providers. If omitted, fallback chain is: DDG API -> DDG HTML fetch -> DDG browser -> Google -> Bing."),
+        .describe("Optional: List of specific providers. If omitted, fallback chain is: DDG Fetch (no Chrome) -> DDG API -> DDG browser -> Google -> Bing."),
     },
     implementation: async ({ query, providers }) => {
       type SearchProvider = "duckduckgo-api" | "duckduckgo-fetch" | "duckduckgo-html" | "google" | "bing";
@@ -1558,10 +1558,16 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           }
         }
       } else {
-        const chain: SearchProvider[] = ["duckduckgo-api", "duckduckgo-fetch", "duckduckgo-html", "google", "bing"];
+        const chain: SearchProvider[] = ["duckduckgo-fetch", "duckduckgo-api", "duckduckgo-html", "google", "bing"];
+        const browserProviders: SearchProvider[] = ["duckduckgo-html", "google", "bing"];
+        let chromeUnavailable = false;
 
         for (let i = 0; i < chain.length; i++) {
           const providerKey = chain[i];
+          if (chromeUnavailable && browserProviders.includes(providerKey)) {
+            logs.push(`[Fallback Chain] Skipping ${providerKey}: Chrome not available on this system.`);
+            continue;
+          }
           const nextProvider = chain[i + 1];
           try {
             logs.push(`[Fallback Chain] Attempting ${providerKey}...`);
@@ -1572,8 +1578,13 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           } catch (e) {
             const errMsg = e instanceof Error ? e.message : String(e);
             errors.push(`${providerKey}: ${errMsg}`);
-            const nextMsg = nextProvider ? `Falling back to ${nextProvider}...` : "No more providers.";
-            logs.push(`[Fallback Chain] Failed: ${providerKey} - ${errMsg}. ${nextMsg}`);
+            if (/chrome|chromium/i.test(errMsg) && browserProviders.includes(providerKey)) {
+              chromeUnavailable = true;
+              logs.push(`[Fallback Chain] Failed: ${providerKey} - Chrome not available. Skipping all browser-based providers.`);
+            } else {
+              const nextMsg = nextProvider ? `Falling back to ${nextProvider}...` : "No more providers.";
+              logs.push(`[Fallback Chain] Failed: ${providerKey} - ${errMsg}. ${nextMsg}`);
+            }
           }
         }
       }
@@ -2964,33 +2975,34 @@ Always assume relative paths are from this directory.`;
                 }
 
                 // Check for explicit completion phrase or strict loop limit
-                const planningLikeText = /(?:\bI(?:'ll| will)\b|\blet me\b|\bnext\b|\bfirst\b)/i.test(trimmed);
-                const shouldTreatAsFinalResponse =
-                  executedToolCallCount > 0 &&
-                  trimmed.length >= 120 &&
-                  !planningLikeText;
+                 const planningLikeText = /(?:\bI(?:'ll| will)\b|\blet me\b|\bnext\b|\bfirst\b)/i.test(trimmed);
+                 const shouldTreatAsFinalResponse =
+                   trimmed.length >= 120 &&
+                   !planningLikeText;
 
-                if (content.includes("TASK_COMPLETED") || shouldTreatAsFinalResponse || loops >= loopLimit - 1) {
-                  break; // Done
-                } else {
-                  noToolCallCount++;
-                  if (content.trim().length > 0) {
-                    msgList.push({ role: "assistant", content: content });
-                  }
+                 // Increment no-tool counter
+                 noToolCallCount++;
 
-                  let reminder = "SYSTEM NOTICE: You did not call a tool. If you are finished, output 'TASK_COMPLETED'. If not, USE A TOOL now and return a single JSON tool-call object only (no prose).";
-                  if (toolsEnabled) {
-                    if (allowFileSystem && suggestedReadPath && noToolCallCount <= 3) {
-                      const escapedPath = suggestedReadPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-                      reminder += `\nSuggested next step: {"tool":"read_file","args":{"file_name":"${escapedPath}"}}`;
-                    } else if (allowFileSystem && noToolCallCount <= 3) {
-                      reminder += `\nSuggested next step: {"tool":"list_directory","args":{}}`;
-                    }
-                  }
+                 if (content.includes("TASK_COMPLETED") || shouldTreatAsFinalResponse || noToolCallCount >= 3 || loops >= loopLimit - 1) {
+                   break; // Done
+                 }
 
-                  msgList.push({ role: "system", content: reminder });
-                  loops++;
-                }
+                 if (content.trim().length > 0) {
+                   msgList.push({ role: "assistant", content: content });
+                 }
+
+                 let reminder = "SYSTEM NOTICE: You did not call a tool. If you are finished, output 'TASK_COMPLETED'. If not, USE A TOOL now and return a single JSON tool-call object only (no prose).";
+                 if (toolsEnabled) {
+                   if (allowFileSystem && suggestedReadPath && noToolCallCount <= 3) {
+                     const escapedPath = suggestedReadPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+                     reminder += `\nSuggested next step: {"tool":"read_file","args":{"file_name":"${escapedPath}"}}`;
+                   } else if (allowFileSystem && noToolCallCount <= 3) {
+                     reminder += `\nSuggested next step: {"tool":"list_directory","args":{}}`;
+                   }
+                 }
+
+                 msgList.push({ role: "system", content: reminder });
+                 loops++;
               }
             } catch (err: any) { return { error: err.message, filesModified }; }
 
@@ -3739,7 +3751,34 @@ Always assume relative paths are from this directory.`;
 
 } // End of if (allowGitHubTools)
 
+  // Sort tools: casual/general-purpose first, then advanced/developer tools.
+  // Within each category, preserve alphabetical order.
+  const casualTools = new Set([
+    // File ops
+    "change_directory", "list_directory", "read_file", "read_file_range",
+    "save_file", "create_file", "move_file", "copy_file",
+    "delete_path", "delete_files_by_pattern", "make_directory",
+    "find_files", "fuzzy_find_local_files", "get_file_metadata",
+    "search_file_content", "search_in_file", "search_directory",
+    // File editing
+    "replace_text_in_file", "multi_replace_text",
+    "insert_at_line", "append_file", "delete_lines_in_file",
+    // Web / RAG
+    "web_search", "fetch_web_content", "wikipedia_search",
+    "rag_web_content", "rag_local_files",
+    // System / utility
+    "get_system_info", "read_clipboard", "write_clipboard",
+    "open_file_or_url", "preview_html", "read_document",
+    "save_memory", "send_notification",
+  ]);
 
+  tools.sort((a, b) => {
+    const aCasual = casualTools.has(a.name);
+    const bCasual = casualTools.has(b.name);
+    if (aCasual && !bCasual) return -1;
+    if (!aCasual && bCasual) return 1;
+    return a.name.localeCompare(b.name);
+  });
 
   return tools;
 }

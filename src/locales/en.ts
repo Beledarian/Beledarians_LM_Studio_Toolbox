@@ -69,6 +69,10 @@ export const en: LocaleDict = {
       displayName: "Allow All Code Execution",
       subtitle: "MASTER SWITCH: Overrides all other settings to enable ALL execution tools.",
     },
+    protectedPaths: {
+      displayName: "Protected Paths",
+      subtitle: "List of drives or paths to block all file/shell operations on (e.g. D:\\, C:\\Windows). One per line. Shell commands cannot be fully blocked by path matching — use this as a safeguard, not a security boundary.",
+    },
 
     searchApiKey: {
       displayName: "Search API Key",
@@ -169,6 +173,11 @@ export const en: LocaleDict = {
       displayName: "Show Full Code Output",
       subtitle:
         "If enabled, the Main Agent will display the full code content of generated files instead of just the file paths.",
+    },
+    simpleSystemPrompt: {
+      displayName: "Simplified System Prompt",
+      subtitle:
+        "Use a condensed system prompt to reduce latency for CPU-only workflows. Warning: May reduce tool-use accuracy with some models.",
     },
   },
 

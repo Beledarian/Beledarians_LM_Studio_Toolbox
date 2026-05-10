@@ -62,6 +62,10 @@ export const de: LocaleDict = {
       displayName: "Alle Codeausführung erlauben",
       subtitle: "HAUPTSCHALTER: Überschreibt alle anderen Einstellungen und aktiviert ALLE Ausführungstools.",
     },
+    protectedPaths: {
+      displayName: "Geschützte Pfade",
+      subtitle: "Liste der Laufwerke oder Pfade, für die alle Vorgänge blockiert werden sollen (z. B. D:\\, C:\\Windows). Eine pro Zeile. Shell-Befehle können durch Pfadabgleich nicht vollständig blockiert werden – als Schutzmaßnahme verwenden, nicht als Sicherheitsgrenze.",
+    },
     searchApiKey: {
       displayName: "Such-API-Schlüssel",
       subtitle: "Optionaler API-Schlüssel für Suchdienste zur Vermeidung von Rate-Limits.",
@@ -143,8 +147,14 @@ export const de: LocaleDict = {
       subtitle: "Wenn aktiviert, werden vom Sub-Agenten generierte, nicht explizit gespeicherte Code-Blöcke automatisch in Dateien gespeichert.",
     },
     showFullCodeOutput: {
-      displayName: "Vollständige Code-Ausgabe anzeigen",
-      subtitle: "Wenn aktiviert, zeigt der Hauptagent den vollständigen Code-Inhalt generierter Dateien statt nur der Dateipfade.",
+      displayName: "Vollständige Codeausgabe anzeigen",
+      subtitle:
+        "Wenn aktiviert, zeigt der Haupt-Agent den vollständigen Code-Inhalt generierter Dateien anstelle nur der Dateipfade.",
+    },
+    simpleSystemPrompt: {
+      displayName: "Vereinfachter System-Prompt",
+      subtitle:
+        "Verwendet einen komprimierten System-Prompt, um die Latenz bei CPU-Workflows zu reduzieren. Warnung: Kann die Tool-Nutzungsgenauigkeit bei einigen Modellen verringern.",
     },
   },
 

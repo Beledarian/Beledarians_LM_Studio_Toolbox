@@ -62,6 +62,10 @@ export const zhTW: LocaleDict = {
       displayName: "允許所有程式碼執行",
       subtitle: "主開關：覆蓋所有其他設定，啟用全部執行工具。",
     },
+    protectedPaths: {
+      displayName: "受保護路徑",
+      subtitle: "要禁止所有操作的磁碟機或路徑列表（例如 D:\\、C:\\Windows）。每行一個。⚠️ Shell 指令無法透過路徑比對完全攔截——請將此功能視為防護措施，而非安全邊界。",
+    },
     searchApiKey: {
       displayName: "搜尋 API 金鑰",
       subtitle: "搜尋服務的選用 API 金鑰，可避免速率限制。",
@@ -144,7 +148,13 @@ export const zhTW: LocaleDict = {
     },
     showFullCodeOutput: {
       displayName: "顯示完整程式碼輸出",
-      subtitle: "啟用後，主智能體將顯示生成檔案的完整程式碼，而非僅顯示檔案路徑。",
+      subtitle:
+        "啟用後，主代理將顯示生成檔案的完整程式碼內容，而非僅顯示檔案路徑。",
+    },
+    simpleSystemPrompt: {
+      displayName: "簡化系統提示",
+      subtitle:
+        "使用精簡的系統提示以降低 CPU 工作流程的延遲。警告：某些模型可能會降低工具使用準確性。",
     },
   },
 
