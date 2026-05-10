@@ -10,7 +10,7 @@ import {
 import { readFile, writeFile } from "fs/promises";
 import { dirname, join } from "path";
 import { pluginConfigSchematics } from "./config";
-import { TOOLS_DOCUMENTATION } from "./toolsDocumentation";
+import { TOOLS_DOCUMENTATION, TOOLS_DOCUMENTATION_LITE } from "./toolsDocumentation";
 import { getPersistedState, savePersistedState } from "./stateManager";
 import { getDict } from "./locales/i18n";
 
@@ -180,7 +180,8 @@ export async function promptPreprocessor(ctl: PromptPreprocessorController, user
 
   // 2. Tools Documentation & Memory Injection (Startup Only)
   if (isFirstTurn) {
-    let injectionContent = TOOLS_DOCUMENTATION;
+    const simpleSystemPrompt = pluginConfig.get("simpleSystemPrompt");
+    let injectionContent = simpleSystemPrompt ? TOOLS_DOCUMENTATION_LITE : TOOLS_DOCUMENTATION;
 
     try {
         const { currentWorkingDirectory } = state;

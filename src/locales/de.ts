@@ -147,8 +147,14 @@ export const de: LocaleDict = {
       subtitle: "Wenn aktiviert, werden vom Sub-Agenten generierte, nicht explizit gespeicherte Code-Blöcke automatisch in Dateien gespeichert.",
     },
     showFullCodeOutput: {
-      displayName: "Vollständige Code-Ausgabe anzeigen",
-      subtitle: "Wenn aktiviert, zeigt der Hauptagent den vollständigen Code-Inhalt generierter Dateien statt nur der Dateipfade.",
+      displayName: "Vollständige Codeausgabe anzeigen",
+      subtitle:
+        "Wenn aktiviert, zeigt der Haupt-Agent den vollständigen Code-Inhalt generierter Dateien anstelle nur der Dateipfade.",
+    },
+    simpleSystemPrompt: {
+      displayName: "Vereinfachter System-Prompt",
+      subtitle:
+        "Verwendet einen komprimierten System-Prompt, um die Latenz bei CPU-Workflows zu reduzieren. Warnung: Kann die Tool-Nutzungsgenauigkeit bei einigen Modellen verringern.",
     },
   },
 

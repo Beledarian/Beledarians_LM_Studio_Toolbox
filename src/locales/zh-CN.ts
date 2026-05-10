@@ -179,7 +179,12 @@ export const zhCN: LocaleDict = {
     showFullCodeOutput: {
       displayName: "显示完整代码输出",
       subtitle:
-        "启用后，主智能体在聊天中将展示生成文件的完整代码内容，而非仅显示文件路径。",
+        "启用后，主代理将显示生成文件的完整代码内容，而非仅显示文件路径。",
+    },
+    simpleSystemPrompt: {
+      displayName: "简化系统提示",
+      subtitle:
+        "使用精简的系统提示以降低 CPU 工作流程的延迟。警告：某些模型可能会降低工具使用准确性。",
     },
   },
 

@@ -51,6 +51,7 @@ export interface LocaleDict {
     enableSubAgentDebugLogging: { displayName: string; subtitle: string };
     subAgentAutoSave: { displayName: string; subtitle: string };
     showFullCodeOutput: { displayName: string; subtitle: string };
+    simpleSystemPrompt: { displayName: string; subtitle: string };
   };
 
   // ──────────────────────────────────────────────────────────────

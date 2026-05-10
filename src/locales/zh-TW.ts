@@ -148,7 +148,13 @@ export const zhTW: LocaleDict = {
     },
     showFullCodeOutput: {
       displayName: "顯示完整程式碼輸出",
-      subtitle: "啟用後，主智能體將顯示生成檔案的完整程式碼，而非僅顯示檔案路徑。",
+      subtitle:
+        "啟用後，主代理將顯示生成檔案的完整程式碼內容，而非僅顯示檔案路徑。",
+    },
+    simpleSystemPrompt: {
+      displayName: "簡化系統提示",
+      subtitle:
+        "使用精簡的系統提示以降低 CPU 工作流程的延遲。警告：某些模型可能會降低工具使用準確性。",
     },
   },
 

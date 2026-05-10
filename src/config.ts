@@ -191,4 +191,8 @@ export const pluginConfigSchematics = createConfigSchematics()
     displayName: c.showFullCodeOutput.displayName,
     subtitle: c.showFullCodeOutput.subtitle,
   }, false)
+  .field("simpleSystemPrompt", "boolean", {
+    displayName: c.simpleSystemPrompt.displayName,
+    subtitle: c.simpleSystemPrompt.subtitle,
+  }, false)
   .build();

@@ -174,6 +174,11 @@ export const en: LocaleDict = {
       subtitle:
         "If enabled, the Main Agent will display the full code content of generated files instead of just the file paths.",
     },
+    simpleSystemPrompt: {
+      displayName: "Simplified System Prompt",
+      subtitle:
+        "Use a condensed system prompt to reduce latency for CPU-only workflows. Warning: May reduce tool-use accuracy with some models.",
+    },
   },
 
   runtime: {
