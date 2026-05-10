@@ -24,14 +24,20 @@
 > **覺得這個項目有幫助？** 請考慮在 [GitHub 上點個 ⭐](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox) 或 [參與貢獻！](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox/tree/main?tab=contributing-ov-file) 感謝您使用本工具箱。
 
 
-### 最近更新 (v1.3.1)
+### 最新更新 (v1.3.2)
+
+- **🛠️ 工具重排序與最佳化：** 重新排序了工具列表，優先提供常用實用工具，提升了代理的工具選擇能力。升級了網路搜尋工具，加入了智能 Chrome 檢測與備用機制。
+- **🤖 子代理可靠性重構：** 全面重構了子代理循環以防止無限循環，改進了工具調用解析，統一了路徑與內容標準化，並添加了顯式的任務完成/中止功能 (`TASK_FAILED`)。
+- **✨ 新增子代理工具：** 為子代理賦予了 `multi_replace_text`、`search_directory` 和後台命令執行能力。主代理現在也支持強大的批量文件保存。
+
+<details>
+<summary><strong>歷史更新 (v1.3.1 及更早版本)</strong></summary>
+
+### v1.3.1
 
 - **🌍 全面國際化 (i18n)**：為介面和運行時提供完整的 **中文（繁體/簡體）**、**英語** 和 **德語** 支持。
 - **🌐 雙層翻譯機制**：同時支持「配置介面」（靜態）和運行時的動態語言。
 - **🔄 介面語言覆蓋**：新增手動強制介面語言的選項，方便在下次插件重啟時測試特定語言。
-
-<details>
-<summary><strong>歷史更新 (v1.3.0 及更早版本)</strong></summary>
 
 ### v1.3.0
 

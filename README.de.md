@@ -24,14 +24,20 @@ Dieses Projekt ist ein Plugin für [LM Studio](https://lmstudio.ai/), das einem 
 > **Finden Sie dieses Projekt hilfreich?** Erwägen Sie, ihm einen [⭐ auf GitHub zu geben](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox) oder [beizutragen!](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox/tree/main?tab=contributing-ov-file) Vielen Dank, dass Sie die Toolbox verwenden.
 
 
-### Aktuelle Updates (v1.3.1)
+### Aktuelle Updates (v1.3.2)
+
+- **🛠️ Neuordnung & Optimierung der Werkzeuge:** Die Werkzeugliste wurde neu geordnet, um alltägliche Hilfsmittel zu priorisieren und so die Auswahl durch den Agenten zu verbessern. Das Websuche-Werkzeug wurde mit intelligenter Chrome-Erkennung und Fallback-Strategie aufgewertet.
+- **🤖 Überarbeitung der Sub-Agenten-Zuverlässigkeit:** Die Sub-Agenten-Schleife wurde komplett überarbeitet, um Endlosschleifen zu verhindern. Zudem wurden das Parsen von Tool-Aufrufen verbessert, die Pfad-/Inhaltsnormalisierung vereinheitlicht und explizite Abbruch-/Abschluss-Fähigkeiten (`TASK_FAILED`) hinzugefügt.
+- **✨ Neue Sub-Agenten-Werkzeuge:** Sub-Agenten können nun `multi_replace_text`, `search_directory` und Hintergrundbefehle (`execute_command`) nutzen. Hauptagenten unterstützen jetzt auch das robuste, stapelweise Speichern von Dateien (Batch Saving).
+
+<details>
+<summary><strong>Ältere Updates (v1.3.1 & früher)</strong></summary>
+
+### v1.3.1
 
 - **🌍 Volle Internationalisierung (i18n):** Komplette Unterstützung für **Deutsch**, **Englisch**, **vereinfachtes Chinesisch** und **traditionelles Chinesisch** in der Benutzeroberfläche und zur Laufzeit.
 - **🌐 Dual-Layer Übersetzung:** Unterstützt sowohl die "Config UI" (statisch) als auch "Agenten-Nachrichten" (dynamisch zur Laufzeit).
 - **🔄 UI Language Override:** Manuelles Erzwingen der UI-Sprache für den nächsten Plugin-Neustart zur einfacheren Lokalisierungskontrolle.
-
-<details>
-<summary><strong>Ältere Updates (v1.3.0 & früher)</strong></summary>
 
 ### v1.3.0
 
