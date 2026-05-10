@@ -1,0 +1,1058 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Beledarians LM Studio Toolbox - AI Plugin Demo</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        :root {
+            --primary: #6366f1;
+            --primary-hover: #4f46e5;
+            --secondary: #8b5cf6;
+            --accent-blue: #0ea5e9;
+            --accent-green: #22c55e;
+            --accent-orange: #f97316;
+            --accent-pink: #ec4899;
+            --bg-dark: #0f0f23;
+            --bg-card: #1a1a2e;
+            --bg-surface: #16213e;
+            --text-primary: #ffffff;
+            --text-secondary: #a0aec0;
+            --border-color: rgba(99, 102, 241, 0.2);
+            --shadow-glow: 0 0 30px rgba(99, 102, 241, 0.3);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-primary);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        /* Animated Background */
+        .animated-bg {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+            background: linear-gradient(135deg, #0f0f23 0%, #1a1a2e 50%, #0d1117 100%);
+        }
+
+        .animated-bg::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle at 20% 30%, rgba(99, 102, 241, 0.08) 0%, transparent 40%),
+                        radial-gradient(circle at 80% 70%, rgba(139, 92, 246, 0.06) 0%, transparent 40%),
+                        radial-gradient(circle at 50% 50%, rgba(14, 165, 233, 0.04) 0%, transparent 50%);
+            animation: rotateBackground 30s linear infinite;
+        }
+
+        @keyframes rotateBackground {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Navigation */
+        nav {
+            position: fixed;
+            top: 0;
+            width: 100%;
+            background: rgba(15, 15, 35, 0.9);
+            backdrop-filter: blur(20px);
+            border-bottom: 1px solid var(--border-color);
+            z-index: 1000;
+            padding: 1rem 2rem;
+        }
+
+        .nav-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            font-weight: 700;
+            font-size: 1.25rem;
+            text-decoration: none;
+            color: var(--text-primary);
+        }
+
+        .logo-icon {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 2rem;
+            list-style: none;
+        }
+
+        .nav-links a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+
+        .nav-links a:hover,
+        .nav-links a.active {
+            color: var(--primary);
+        }
+
+        .nav-links a::after {
+            content: '';
+            position: absolute;
+            bottom: -4px;
+            left: 0;
+            width: 0;
+            height: 2px;
+            background: linear-gradient(90deg, var(--primary), var(--secondary));
+            transition: width 0.3s ease;
+        }
+
+        .nav-links a:hover::after {
+            width: 100%;
+        }
+
+        /* Hero Section */
+        .hero {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 8rem 2rem 4rem;
+            position: relative;
+        }
+
+        .hero-grid {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 4rem;
+            align-items: center;
+        }
+
+        .hero-content h1 {
+            font-size: 4rem;
+            font-weight: 800;
+            line-height: 1.1;
+            margin-bottom: 1.5rem;
+            background: linear-gradient(135deg, #fff 0%, var(--primary) 50%, var(--secondary) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .hero-content p {
+            font-size: 1.25rem;
+            color: var(--text-secondary);
+            margin-bottom: 2rem;
+            max-width: 600px;
+        }
+
+        .hero-buttons {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 1rem 2rem;
+            border-radius: 12px;
+            font-weight: 600;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            border: none;
+            font-size: 1rem;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: white;
+            box-shadow: 0 4px 20px rgba(99, 102, 241, 0.4);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 30px rgba(99, 102, 241, 0.6);
+        }
+
+        .btn-secondary {
+            background: transparent;
+            color: var(--text-primary);
+            border: 2px solid var(--border-color);
+        }
+
+        .btn-secondary:hover {
+            border-color: var(--primary);
+            transform: translateY(-2px);
+        }
+
+        /* Hero Visual */
+        .hero-visual {
+            position: relative;
+        }
+
+        .plugin-preview {
+            background: var(--bg-card);
+            border-radius: 20px;
+            padding: 2rem;
+            border: 1px solid var(--border-color);
+            box-shadow: var(--shadow-glow);
+            animation: float 6s ease-in-out infinite;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-20px); }
+        }
+
+        .preview-header {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 1.5rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .dot-red { background: #ff5f56; }
+        .dot-yellow { background: #ffbd2e; }
+        .dot-green { background: #27c93f; }
+
+        .preview-content {
+            display: grid;
+            gap: 1rem;
+        }
+
+        .feature-preview-item {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 0.75rem;
+            background: var(--bg-surface);
+            border-radius: 8px;
+            font-size: 0.9rem;
+        }
+
+        .feature-preview-item svg {
+            color: var(--accent-green);
+        }
+
+        /* Stats Section */
+        .stats-section {
+            padding: 4rem 2rem;
+            background: rgba(26, 26, 46, 0.5);
+        }
+
+        .stats-grid {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 2rem;
+        }
+
+        .stat-card {
+            text-align: center;
+            padding: 2rem;
+            background: var(--bg-card);
+            border-radius: 16px;
+            border: 1px solid var(--border-color);
+            transition: all 0.3s ease;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-4px);
+            box-shadow: var(--shadow-glow);
+        }
+
+        .stat-number {
+            font-size: 2.5rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, var(--primary), var(--accent-blue));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .stat-label {
+            color: var(--text-secondary);
+            margin-top: 0.5rem;
+        }
+
+        /* Features Section */
+        .features-section {
+            padding: 8rem 2rem;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .section-header {
+            text-align: center;
+            margin-bottom: 4rem;
+        }
+
+        .section-label {
+            display: inline-block;
+            padding: 0.5rem 1rem;
+            background: rgba(99, 102, 241, 0.1);
+            border-radius: 20px;
+            color: var(--primary);
+            font-weight: 600;
+            font-size: 0.875rem;
+            margin-bottom: 1rem;
+        }
+
+        .section-title {
+            font-size: 3rem;
+            font-weight: 800;
+            margin-bottom: 1rem;
+        }
+
+        .section-subtitle {
+            color: var(--text-secondary);
+            font-size: 1.25rem;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 2rem;
+        }
+
+        .feature-card {
+            background: var(--bg-card);
+            border-radius: 20px;
+            padding: 2.5rem;
+            border: 1px solid var(--border-color);
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .feature-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, var(--primary), var(--secondary));
+            transform: scaleX(0);
+            transition: transform 0.3s ease;
+        }
+
+        .feature-card:hover::before {
+            transform: scaleX(1);
+        }
+
+        .feature-card:hover {
+            transform: translateY(-8px);
+            box-shadow: var(--shadow-glow);
+            border-color: var(--primary);
+        }
+
+        .feature-icon {
+            width: 64px;
+            height: 64px;
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(139, 92, 246, 0.1));
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .feature-card h3 {
+            font-size: 1.25rem;
+            font-weight: 700;
+            margin-bottom: 1rem;
+        }
+
+        .feature-card p {
+            color: var(--text-secondary);
+            line-height: 1.6;
+        }
+
+        .feature-tag {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            background: rgba(99, 102, 241, 0.1);
+            border-radius: 20px;
+            font-size: 0.8125rem;
+            color: var(--primary);
+            margin-top: 1rem;
+        }
+
+        /* Code Execution Section */
+        .code-section {
+            padding: 8rem 2rem;
+            background: rgba(26, 26, 46, 0.3);
+        }
+
+        .code-grid {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 4rem;
+            align-items: center;
+        }
+
+        .code-demo {
+            background: #0d1117;
+            border-radius: 16px;
+            padding: 2rem;
+            font-family: 'Monaco', 'Courier New', monospace;
+            overflow-x: auto;
+            border: 1px solid var(--border-color);
+        }
+
+        .code-header {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 1.5rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .code-line {
+            margin-bottom: 0.5rem;
+            font-size: 0.9rem;
+        }
+
+        .code-keyword { color: #ff7b72; }
+        .code-function { color: #d2a8ff; }
+        .code-string { color: #a5d6ff; }
+        .code-comment { color: #8b949e; }
+
+        /* GitHub Integration Section */
+        .github-section {
+            padding: 8rem 2rem;
+        }
+
+        .github-grid {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+        }
+
+        .github-feature {
+            background: var(--bg-card);
+            border-radius: 16px;
+            padding: 2rem;
+            border: 1px solid var(--border-color);
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+
+        .github-feature:hover {
+            transform: translateY(-4px);
+            box-shadow: var(--shadow-glow);
+        }
+
+        /* Agent Section */
+        .agent-section {
+            padding: 8rem 2rem;
+            background: rgba(26, 26, 46, 0.3);
+        }
+
+        .agent-visual {
+            max-width: 1400px;
+            margin: 0 auto;
+            text-align: center;
+        }
+
+        .agent-diagram {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 2rem;
+            flex-wrap: wrap;
+            margin-top: 3rem;
+        }
+
+        .agent-node {
+            background: var(--bg-card);
+            border-radius: 16px;
+            padding: 2rem;
+            border: 2px solid var(--border-color);
+            min-width: 200px;
+            transition: all 0.3s ease;
+        }
+
+        .agent-node:hover {
+            border-color: var(--primary);
+            box-shadow: var(--shadow-glow);
+        }
+
+        /* Security Section */
+        .security-section {
+            padding: 8rem 2rem;
+        }
+
+        .security-grid {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 2rem;
+        }
+
+        .security-card {
+            background: var(--bg-card);
+            border-radius: 16px;
+            padding: 2rem;
+            text-align: center;
+            border: 1px solid var(--border-color);
+            transition: all 0.3s ease;
+        }
+
+        .security-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 0 30px rgba(34, 197, 94, 0.2);
+        }
+
+        .security-icon {
+            color: var(--accent-green);
+            margin-bottom: 1rem;
+        }
+
+        /* CTA Section */
+        .cta-section {
+            padding: 8rem 2rem;
+            text-align: center;
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(139, 92, 246, 0.1));
+        }
+
+        .cta-content {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        /* Footer */
+        footer {
+            padding: 4rem 2rem;
+            background: rgba(15, 15, 35, 0.9);
+            border-top: 1px solid var(--border-color);
+        }
+
+        .footer-content {
+            max-width: 1400px;
+            margin: 0 auto;
+            text-align: center;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .hero-grid,
+            .code-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .hero-content h1 {
+                font-size: 2.5rem;
+            }
+
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .nav-links {
+                display: none;
+            }
+        }
+
+        /* Animations */
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .animate-in {
+            animation: fadeInUp 0.8s ease forwards;
+        }
+    </style>
+</head>
+<body>
+    <div class="animated-bg"></div>
+
+    <!-- Navigation -->
+    <nav>
+        <div class="nav-container">
+            <a href="#" class="logo">
+                <div class="logo-icon">
+                    <i data-lucide="wrench" style="width: 24px; height: 24px;"></i>
+                </div>
+                LM Studio Toolbox
+            </a>
+            <ul class="nav-links">
+                <li><a href="#features" class="active">Features</a></li>
+                <li><a href="#code-execution">Code</a></li>
+                <li><a href="#github">GitHub</a></li>
+                <li><a href="#agents">Agents</a></li>
+                <li><a href="#security">Security</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="hero-grid">
+            <div class="hero-content animate-in">
+                <h1>Your AI Assistant, Supercharged</h1>
+                <p>A comprehensive plugin for LM Studio that transforms your LLM into a powerful autonomous agent with file system access, code execution, GitHub integration, and more.</p>
+                <div class="hero-buttons">
+                    <a href="#features" class="btn btn-primary">
+                        <i data-lucide="zap"></i> Explore Features
+                    </a>
+                    <a href="https://github.com/beledarian/Beledarians_LM_Studio_Toolbox" target="_blank" class="btn btn-secondary">
+                        <i data-lucide="github"></i> View on GitHub
+                    </a>
+                </div>
+            </div>
+            <div class="hero-visual animate-in">
+                <div class="plugin-preview">
+                    <div class="preview-header">
+                        <div class="dot dot-red"></div>
+                        <div class="dot dot-yellow"></div>
+                        <div class="dot dot-green"></div>
+                    </div>
+                    <div class="preview-content">
+                        <div class="feature-preview-item">
+                            <i data-lucide="file-text" style="width: 20px; height: 20px;"></i>
+                            <span>Create files & folders</span>
+                        </div>
+                        <div class="feature-preview-item">
+                            <i data-lucide="code-2" style="width: 20px; height: 20px;"></i>
+                            <span>Execute Python/JS code</span>
+                        </div>
+                        <div class="feature-preview-item">
+                            <i data-lucide="git-pull-request" style="width: 20px; height: 20px;"></i>
+                            <span>Create & manage PRs</span>
+                        </div>
+                        <div class="feature-preview-item">
+                            <i data-lucide="search" style="width: 20px; height: 20px;"></i>
+                            <span>RAG web search</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Stats Section -->
+    <section class="stats-section">
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-number">51+</div>
+                <div class="stat-label">Regression Tests</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">60+</div>
+                <div class="stat-label">GitHub Stars</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">1.3.2</div>
+                <div class="stat-label">Latest Version</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">MIT</div>
+                <div class="stat-label">Open Source License</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section class="features-section" id="features">
+        <div class="section-header animate-in">
+            <span class="section-label">Capabilities</span>
+            <h2 class="section-title">Everything Your AI Needs</h2>
+            <p class="section-subtitle">A complete toolkit for autonomous agents, bridging the gap between LLMs and your local environment.</p>
+        </div>
+
+        <div class="features-grid">
+            <div class="feature-card animate-in">
+                <div class="feature-icon" style="color: var(--accent-blue);">
+                    <i data-lucide="folder-open"></i>
+                </div>
+                <h3>File System Mastery</h3>
+                <p>Create, read, update, delete, move, and copy files with sandboxed security. Full path traversal protection ensures safe operations.</p>
+                <span class="feature-tag">Sandboxed</span>
+            </div>
+
+            <div class="feature-card animate-in">
+                <div class="feature-icon" style="color: var(--accent-green);">
+                    <i data-lucide="terminal"></i>
+                </div>
+                <h3>Code Execution</h3>
+                <p>Run JavaScript (Deno) and Python code in secure, isolated environments. Perfect for testing, automation, and prototyping.</p>
+                <span class="feature-tag">Secure</span>
+            </div>
+
+            <div class="feature-card animate-in">
+                <div class="feature-icon" style="color: var(--accent-orange);">
+                    <i data-lucide="users"></i>
+                </div>
+                <h3>Autonomous Agents</h3>
+                <p>Delegate complex tasks to secondary agents with auto-save and auto-debug capabilities for reliable task completion.</p>
+                <span class="feature-tag">AI-Powered</span>
+            </div>
+
+            <div class="feature-card animate-in">
+                <div class="feature-icon" style="color: var(--accent-pink);">
+                    <i data-lucide="globe"></i>
+                </div>
+                <h3>Web & RAG Search</h3>
+                <p>Search DuckDuckGo, Wikipedia, and perform persistent browser automation for real-time information retrieval.</p>
+                <span class="feature-tag">Connected</span>
+            </div>
+
+            <div class="feature-card animate-in">
+                <div class="feature-icon" style="color: var(--primary);">
+                    <i data-lucide="git-branch"></i>
+                </div>
+                <h3>GitHub Integration</h3>
+                <p>Native GitHub CLI integration for secure issues, PRs, commits, and repository management without shell commands.</p>
+                <span class="feature-tag">Native</span>
+            </div>
+
+            <div class="feature-card animate-in">
+                <div class="feature-icon" style="color: var(--accent-green);">
+                    <i data-lucide="shield-check"></i>
+                </div>
+                <h3>Security First</h3>
+                <p>Sandboxed execution, path traversal protection, and comprehensive input validation for safe operations.</p>
+                <span class="feature-tag">Protected</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- Code Execution Section -->
+    <section class="code-section" id="code-execution">
+        <div class="code-grid">
+            <div class="animate-in">
+                <span class="section-label">Execution</span>
+                <h2 class="section-title">Run Any Code Securely</h2>
+                <p style="color: var(--text-secondary); margin-bottom: 2rem;">Execute JavaScript and Python code in isolated environments. Perfect for testing algorithms, automating tasks, or building prototypes.</p>
+                
+                <div style="display: flex; flex-direction: column; gap: 1rem;">
+                    <div style="display: flex; align-items: center; gap: 1rem;">
+                        <i data-lucide="check-circle" style="color: var(--accent-green);"></i>
+                        <span>Sandboxed execution environments</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 1rem;">
+                        <i data-lucide="check-circle" style="color: var(--accent-green);"></i>
+                        <span>Deno for JavaScript support</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 1rem;">
+                        <i data-lucide="check-circle" style="color: var(--accent-green);"></i>
+                        <span>Python with secure libraries</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 1rem;">
+                        <i data-lucide="check-circle" style="color: var(--accent-green);"></i>
+                        <span>Timeout protection built-in</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="code-demo animate-in">
+                <div class="code-header">
+                    <div class="dot dot-red"></div>
+                    <div class="dot dot-yellow"></div>
+                    <div class="dot dot-green"></div>
+                </div>
+                <pre><code><span class="code-comment">// Execute JavaScript with Deno</span>
+<span class="code-keyword">const</span> <span class="code-function">result</span> = <span class="code-keyword">await</span> <span class="code-function">executeJs</span>({
+  code: `<span class="code-string">'console.log("Hello World")'</span>`,
+  timeout: 5000
+});
+
+<span class="code-comment">// Run Python script securely</span>
+<span class="code-keyword">const</span> <span class="code-function">output</span> = <span class="code-keyword">await</span> <span class="code-function">executePython</span>({
+  code: `<span class="code-string">'import math; print(math.pi)'</span>`,
+  sandboxed: <span class="code-keyword">true</span>
+});
+
+<span class="code-comment">// Delegate to secondary agent</span>
+<span class="code-keyword">const</span> <span class="code-function">task</span> = <span class="code-keyword">await</span> <span class="code-function">consultAgent</span>({
+  task: <span class="code-string">'Analyze this codebase'</span>,
+  agentRole: <span class="code-string">'coder'</span>,
+  allowTools: <span class="code-keyword">true</span>
+});</code></pre>
+            </div>
+        </div>
+    </section>
+
+    <!-- GitHub Integration Section -->
+    <section class="github-section" id="github">
+        <div class="section-header animate-in">
+            <span class="section-label">Integration</span>
+            <h2 class="section-title">Native GitHub CLI</h2>
+            <p class="section-subtitle">Full GitHub functionality without shell commands. Secure, authenticated, and powerful.</p>
+        </div>
+
+        <div class="github-grid">
+            <div class="github-feature animate-in">
+                <i data-lucide="git-pull-request" style="width: 48px; height: 48px; margin-bottom: 1rem; color: var(--accent-blue);"></i>
+                <h3>Pull Requests</h3>
+                <p>Create, list, and manage pull requests with full context preservation.</p>
+            </div>
+
+            <div class="github-feature animate-in">
+                <i data-lucide="circle-alert" style="width: 48px; height: 48px; margin-bottom: 1rem; color: var(--accent-orange);"></i>
+                <h3>Issues</h3>
+                <p>Create and manage issues with labels, descriptions, and tracking.</p>
+            </div>
+
+            <div class="github-feature animate-in">
+                <i data-lucide="git-commit" style="width: 48px; height: 48px; margin-bottom: 1rem; color: var(--accent-green);"></i>
+                <h3>Commits</h3>
+                <p>Stage, commit, and push changes directly to repositories.</p>
+            </div>
+
+            <div class="github-feature animate-in">
+                <i data-lucide="lock" style="width: 48px; height: 48px; margin-bottom: 1rem; color: var(--primary);"></i>
+                <h3>Secure Auth</h3>
+                <p>Github authentication management without exposing tokens.</p>
+            </div>
+
+            <div class="github-feature animate-in">
+                <i data-lucide="code" style="width: 48px; height: 48px; margin-bottom: 1rem; color: var(--accent-pink);"></i>
+                <h3>View PR Diffs</h3>
+                <p>Analyze and review pull request changes with full context.</p>
+            </div>
+
+            <div class="github-feature animate-in">
+                <i data-lucide="message-square" style="width: 48px; height: 48px; margin-bottom: 1rem; color: var(--accent-orange);"></i>
+                <h3>Comments</h3>
+                <p>View and manage comments on issues and pull requests.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Agent Section -->
+    <section class="agent-section" id="agents">
+        <div class="agent-visual animate-in">
+            <span class="section-label">Autonomy</span>
+            <h2 class="section-title">Secondary Agent Delegation</h2>
+            <p class="section-subtitle">Break down complex tasks into manageable sub-tasks with intelligent agent delegation.</p>
+
+            <div class="agent-diagram">
+                <div class="agent-node" style="border-color: var(--primary); box-shadow: var(--shadow-glow);">
+                    <i data-lucide="cpu" style="width: 32px; height: 32px; margin-bottom: 0.5rem;"></i>
+                    <h4>Main Agent</h4>
+                    <p style="font-size: 0.875rem; color: var(--text-secondary);">Receives task & delegates</p>
+                </div>
+
+                <i data-lucide="arrow-right" style="width: 24px; height: 24px;"></i>
+
+                <div class="agent-node" style="border-color: var(--accent-blue);">
+                    <i data-lucide="code" style="width: 32px; height: 32px; margin-bottom: 0.5rem; color: var(--accent-blue);"></i>
+                    <h4>Coder Agent</h4>
+                    <p style="font-size: 0.875rem; color: var(--text-secondary);">Writes & debugs code</p>
+                </div>
+
+                <div class="agent-node" style="border-color: var(--accent-green);">
+                    <i data-lucide="search" style="width: 32px; height: 32px; margin-bottom: 0.5rem; color: var(--accent-green);"></i>
+                    <h4>Research Agent</h4>
+                    <p style="font-size: 0.875rem; color: var(--text-secondary);">Finds & analyzes info</p>
+                </div>
+
+                <div class="agent-node" style="border-color: var(--accent-orange);">
+                    <i data-lucide="file-code-2" style="width: 32px; height: 32px; margin-bottom: 0.5rem; color: var(--accent-orange);"></i>
+                    <h4>Writer Agent</h4>
+                    <p style="font-size: 0.875rem; color: var(--text-secondary);">Creates docs & content</p>
+                </div>
+            </div>
+
+            <div style="display: flex; justify-content: center; gap: 2rem; margin-top: 3rem; flex-wrap: wrap;">
+                <div style="text-align: center;">
+                    <i data-lucide="save" style="width: 24px; height: 24px; color: var(--accent-green);"></i>
+                    <p style="font-size: 0.875rem; margin-top: 0.5rem;">Auto-Save</p>
+                </div>
+                <div style="text-align: center;">
+                    <i data-lucide="bug" style="width: 24px; height: 24px; color: var(--accent-orange);"></i>
+                    <p style="font-size: 0.875rem; margin-top: 0.5rem;">Auto-Debug</p>
+                </div>
+                <div style="text-align: center;">
+                    <i data-lucide="check" style="width: 24px; height: 24px; color: var(--accent-green);"></i>
+                    <p style="font-size: 0.875rem; margin-top: 0.5rem;">Validation</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Security Section -->
+    <section class="security-section" id="security">
+        <div class="section-header animate-in">
+            <span class="section-label">Safety</span>
+            <h2 class="section-title">Security by Design</h2>
+            <p class="section-subtitle">Every operation is protected with multiple layers of security.</p>
+        </div>
+
+        <div class="security-grid">
+            <div class="security-card animate-in">
+                <i data-lucide="shield" style="width: 48px; height: 48px; color: var(--accent-green); margin-bottom: 1rem;"></i>
+                <h3>Sandboxed Execution</h3>
+                <p>All code runs in isolated environments with resource limits.</p>
+            </div>
+
+            <div class="security-card animate-in">
+                <i data-lucide="key" style="width: 48px; height: 48px; color: var(--accent-green); margin-bottom: 1rem;"></i>
+                <h3>Path Traversal Protection</h3>
+                <p>Files can only be accessed within allowed directories.</p>
+            </div>
+
+            <div class="security-card animate-in">
+                <i data-lucide="alert-triangle" style="width: 48px; height: 48px; color: var(--accent-green); margin-bottom: 1rem;"></i>
+                <h3>Input Validation</h3>
+                <p>All inputs are validated before processing to prevent injection.</p>
+            </div>
+
+            <div class="security-card animate-in">
+                <i data-lucide="timer" style="width: 48px; height: 48px; color: var(--accent-green); margin-bottom: 1rem;"></i>
+                <h3>Timeout Protection</h3>
+                <p>All operations have configurable timeouts to prevent hangs.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA Section -->
+    <section class="cta-section">
+        <div class="cta-content animate-in">
+            <span class="section-label">Get Started</span>
+            <h2 class="section-title" style="font-size: 3rem;">Ready to Supercharge Your AI?</h2>
+            <p class="section-subtitle" style="margin-bottom: 2rem;">Join thousands of developers using Beledarians LM Studio Toolbox for autonomous agent development.</p>
+            
+            <div style="text-align: center; margin-bottom: 1.5rem; padding: 0.75rem 1.5rem; background: rgba(34, 197, 94, 0.1); border-radius: 12px; border: 1px solid rgba(34, 197, 94, 0.2);">
+                <div style="display: inline-flex; align-items: center; gap: 0.5rem;">
+                    <i data-lucide="sparkles" style="width: 18px; height: 18px; color: var(--accent-green);"></i>
+                    <span style="color: var(--accent-green); font-weight: 600; font-size: 0.875rem;">AI-Generated Page</span>
+                </div>
+                <p style="margin-top: 0.25rem; color: var(--text-secondary); font-size: 0.8125rem;">This demo page was created by an AI agent using the Beledarians LM Studio Toolbox — proving its autonomous capabilities!</p>
+            </div>
+
+            <div style="display: flex; justify-content: center; gap: 1rem; flex-wrap: wrap;">
+                <a href="https://lmstudio.ai/beledarian/beledarians-lm-studio-tools" target="_blank" class="btn btn-primary">
+                    <i data-lucide="download"></i> Download Latest Release
+                </a>
+                <a href="https://github.com/beledarian/Beledarians_LM_Studio_Toolbox/blob/main/README.md" target="_blank" class="btn btn-secondary">
+                    <i data-lucide="book-open"></i> Read Documentation
+                </a>
+            </div>
+
+            <p style="margin-top: 2rem; color: var(--text-secondary); font-size: 0.875rem;">
+                MIT License · v1.3.2 · Compatible with LM Studio
+            </p>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer>
+        <div class="footer-content">
+            <div style="display: flex; justify-content: center; gap: 2rem; margin-bottom: 2rem;">
+                <a href="https://github.com/beledarian" target="_blank" style="color: var(--text-secondary); text-decoration: none;">
+                    <i data-lucide="github"></i> GitHub
+                </a>
+                <span style="color: var(--border-color);">|</span>
+                <a href="https://github.com/beledarian/Beledarians_LM_Studio_Toolbox/blob/main/LICENSE" target="_blank" style="color: var(--text-secondary); text-decoration: none;">
+                    MIT License
+                </a>
+            </div>
+            <p style="color: var(--text-muted); font-size: 0.875rem;">
+                © 2026 Beledarians LM Studio Toolbox · Built with ❤️ for the AI community
+            </p>
+        </div>
+    </footer>
+
+    <!-- JavaScript -->
+    <script>
+        // Initialize Lucide icons
+        lucide.createIcons();
+
+        // Smooth scroll for navigation links
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    target.scrollIntoView({ behavior: 'smooth' });
+                }
+            });
+        });
+
+        // Add animation on scroll
+        const observerOptions = {
+            threshold: 0.1,
+            rootMargin: '0px 0px -50px 0px'
+        };
+
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('animate-in');
+                }
+            });
+        }, observerOptions);
+
+        document.querySelectorAll('.feature-card, .github-feature, .security-card, .stat-card').forEach(el => {
+            observer.observe(el);
+        });
+    </script>
+</body>
+</html>
