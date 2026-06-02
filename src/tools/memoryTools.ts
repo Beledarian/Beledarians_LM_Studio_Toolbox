@@ -7,14 +7,26 @@ import type { ToolContext } from "./context";
 const DB_FILE = ".memories.db";
 const DISABLED_MSG = "Memory is currently disabled in the plugin settings. Please ask the user to enable 'Enable Memory' in the plugin settings.";
 
-/** Open (or create) the SQLite memory database and ensure the schema exists. */
-async function openDb(cwd: string): Promise<any> {
+/**
+ * Module-level connection cache keyed by absolute DB path.
+ * Keeps a single open connection per workspace so tools don't pay the
+ * open/close overhead on every call (PERF-1).  The `migrationDone` flag
+ * ensures the legacy memory.md import runs at most once per session.
+ */
+const _dbCache = new Map<string, { db: any; migrationDone: boolean }>();
+
+/** Return the cached (or freshly opened) database for the given workspace. */
+async function getDb(cwd: string): Promise<{ db: any; migrationDone: boolean }> {
+  const dbPath = join(cwd, DB_FILE);
+  let entry = _dbCache.get(dbPath);
+  if (entry) return entry;
+
   // Use require() rather than dynamic import(): in a CJS-compiled module,
   // `await import()` of a native addon goes through a different resolution
   // path that can fail on some Node versions even when require() works fine.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const Database: new (path: string) => any = require("better-sqlite3");
-  const db = new Database(join(cwd, DB_FILE));
+  const db = new Database(dbPath);
   db.exec(`
     CREATE TABLE IF NOT EXISTS memories (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -25,7 +37,9 @@ async function openDb(cwd: string): Promise<any> {
     );
     CREATE INDEX IF NOT EXISTS idx_memories_tags ON memories(tags);
   `);
-  return db;
+  entry = { db, migrationDone: false };
+  _dbCache.set(dbPath, entry);
+  return entry;
 }
 
 /**
@@ -87,14 +101,16 @@ export function createMemoryTools(ctx: ToolContext): Tool[] {
     implementation: async ({ fact, tags = "" }) => {
       if (!ctx.enableMemory) return { error: DISABLED_MSG };
       try {
-        const db = await openDb(ctx.cwd);
-        const migrated = await migrateLegacyFile(ctx.cwd, db);
+        const entry = await getDb(ctx.cwd);
+        let migrated = 0;
+        if (!entry.migrationDone) {
+          migrated = await migrateLegacyFile(ctx.cwd, entry.db);
+          entry.migrationDone = true;
+        }
         const now = new Date().toISOString();
-        const stmt = db.prepare(
+        const result = entry.db.prepare(
           "INSERT INTO memories (fact, tags, created_at, updated_at) VALUES (?, ?, ?, ?)"
-        );
-        const result = stmt.run(fact.trim(), tags.trim(), now, now);
-        db.close();
+        ).run(fact.trim(), tags.trim(), now, now);
         const note = migrated > 0 ? ` (also migrated ${migrated} entries from legacy memory.md)` : "";
         return { success: true, id: result.lastInsertRowid, fact, tags, created_at: now, note };
       } catch (e) {
@@ -119,19 +135,11 @@ export function createMemoryTools(ctx: ToolContext): Tool[] {
     implementation: async ({ tag, limit = 50 }) => {
       if (!ctx.enableMemory) return { error: DISABLED_MSG };
       try {
-        const db = await openDb(ctx.cwd);
-        await migrateLegacyFile(ctx.cwd, db);
-        let rows: any[];
-        if (tag) {
-          rows = db.prepare(
-            "SELECT id, fact, tags, created_at, updated_at FROM memories WHERE tags LIKE ? ORDER BY id DESC LIMIT ?"
-          ).all(`%${tag}%`, limit);
-        } else {
-          rows = db.prepare(
-            "SELECT id, fact, tags, created_at, updated_at FROM memories ORDER BY id DESC LIMIT ?"
-          ).all(limit);
-        }
-        db.close();
+        const { db, migrationDone } = await getDb(ctx.cwd);
+        if (!migrationDone) { await migrateLegacyFile(ctx.cwd, db); _dbCache.get(join(ctx.cwd, DB_FILE))!.migrationDone = true; }
+        const rows: any[] = tag
+          ? db.prepare("SELECT id, fact, tags, created_at, updated_at FROM memories WHERE tags LIKE ? ORDER BY id DESC LIMIT ?").all(`%${tag}%`, limit)
+          : db.prepare("SELECT id, fact, tags, created_at, updated_at FROM memories ORDER BY id DESC LIMIT ?").all(limit);
         return { count: rows.length, memories: rows };
       } catch (e) {
         return { error: `Failed to list memories: ${e instanceof Error ? e.message : String(e)}` };
@@ -154,17 +162,12 @@ export function createMemoryTools(ctx: ToolContext): Tool[] {
     implementation: async ({ query, limit = 10 }) => {
       if (!ctx.enableMemory) return { error: DISABLED_MSG };
       try {
-        const db = await openDb(ctx.cwd);
-        await migrateLegacyFile(ctx.cwd, db);
+        const { db, migrationDone } = await getDb(ctx.cwd);
+        if (!migrationDone) { await migrateLegacyFile(ctx.cwd, db); _dbCache.get(join(ctx.cwd, DB_FILE))!.migrationDone = true; }
         const pattern = `%${query}%`;
         const rows = db.prepare(
-          `SELECT id, fact, tags, created_at, updated_at
-           FROM memories
-           WHERE fact LIKE ? OR tags LIKE ?
-           ORDER BY id DESC
-           LIMIT ?`
+          "SELECT id, fact, tags, created_at, updated_at FROM memories WHERE fact LIKE ? OR tags LIKE ? ORDER BY id DESC LIMIT ?"
         ).all(pattern, pattern, limit);
-        db.close();
         return { query, count: rows.length, memories: rows };
       } catch (e) {
         return { error: `Failed to search memories: ${e instanceof Error ? e.message : String(e)}` };
@@ -191,21 +194,13 @@ export function createMemoryTools(ctx: ToolContext): Tool[] {
         return { error: "Provide at least one of 'fact' or 'tags' to update." };
       }
       try {
-        const db = await openDb(ctx.cwd);
-        const existing: any = db.prepare(
-          "SELECT id, fact, tags FROM memories WHERE id = ?"
-        ).get(id);
-        if (!existing) {
-          db.close();
-          return { error: `No memory found with ID ${id}.` };
-        }
+        const { db } = await getDb(ctx.cwd);
+        const existing: any = db.prepare("SELECT id, fact, tags FROM memories WHERE id = ?").get(id);
+        if (!existing) return { error: `No memory found with ID ${id}.` };
         const newFact = fact !== undefined ? fact.trim() : existing.fact;
         const newTags = tags !== undefined ? tags.trim() : existing.tags;
         const now = new Date().toISOString();
-        db.prepare(
-          "UPDATE memories SET fact = ?, tags = ?, updated_at = ? WHERE id = ?"
-        ).run(newFact, newTags, now, id);
-        db.close();
+        db.prepare("UPDATE memories SET fact = ?, tags = ?, updated_at = ? WHERE id = ?").run(newFact, newTags, now, id);
         return { success: true, id, fact: newFact, tags: newTags, updated_at: now };
       } catch (e) {
         return { error: `Failed to update memory: ${e instanceof Error ? e.message : String(e)}` };
@@ -227,14 +222,10 @@ export function createMemoryTools(ctx: ToolContext): Tool[] {
     implementation: async ({ id }) => {
       if (!ctx.enableMemory) return { error: DISABLED_MSG };
       try {
-        const db = await openDb(ctx.cwd);
+        const { db } = await getDb(ctx.cwd);
         const existing: any = db.prepare("SELECT fact FROM memories WHERE id = ?").get(id);
-        if (!existing) {
-          db.close();
-          return { error: `No memory found with ID ${id}.` };
-        }
+        if (!existing) return { error: `No memory found with ID ${id}.` };
         db.prepare("DELETE FROM memories WHERE id = ?").run(id);
-        db.close();
         return { success: true, deleted_id: id, deleted_fact: existing.fact };
       } catch (e) {
         return { error: `Failed to delete memory: ${e instanceof Error ? e.message : String(e)}` };

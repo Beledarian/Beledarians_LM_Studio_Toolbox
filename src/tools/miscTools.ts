@@ -25,28 +25,55 @@ export function createMiscTools(ctx: ToolContext): Tool[] {
 
   // ─── Clipboard ───────────────────────────────────────────────────────────────
 
+  /** Try each {command, args} pair in order; return the first that succeeds. */
+  async function tryClipboardCmds(
+    candidates: Array<{ cmd: string; args: string[]; stdin?: string }>,
+    isRead: boolean,
+  ): Promise<Record<string, unknown>> {
+    for (const { cmd, args, stdin } of candidates) {
+      const result = await new Promise<Record<string, unknown>>(resolve => {
+        const child = spawn(cmd, args, { stdio: ["pipe", "pipe", "pipe"] });
+        let output = "", error = "";
+        child.stdout.on("data", d => output += d.toString());
+        child.stderr.on("data", d => error += d.toString());
+        child.on("close", code => {
+          if (code === 0) resolve(isRead ? { content: output.trim() } : { success: true });
+          else resolve({ _failed: true, error: `${cmd}: exit ${code}. ${error.trim()}` });
+        });
+        child.on("error", () => resolve({ _failed: true, error: `${cmd}: not found` }));
+        if (stdin !== undefined) { child.stdin.write(stdin); child.stdin.end(); }
+        else child.stdin.end();
+      });
+      if (!result._failed) return result;
+    }
+    return { error: "No clipboard tool found. Install xclip, xsel, or wl-clipboard." };
+  }
+
   tools.push(tool({
     name: "read_clipboard",
     description: "Read text content from the system clipboard.",
     parameters: {},
     implementation: async () => {
-      let command = "";
-      let args: string[] = [];
+      let candidates: Array<{ cmd: string; args: string[] }>;
 
-      if (process.platform === "win32") { command = "powershell"; args = ["-command", "Get-Clipboard"]; }
-      else if (process.platform === "darwin") { command = "pbpaste"; }
-      else { command = "xclip"; args = ["-selection", "clipboard", "-o"]; }
+      if (process.platform === "win32") {
+        candidates = [{ cmd: "powershell", args: ["-command", "Get-Clipboard"] }];
+      } else if (process.platform === "darwin") {
+        candidates = [{ cmd: "pbpaste", args: [] }];
+      } else {
+        // Linux: try Wayland first, then X11 tools
+        candidates = [
+          { cmd: "wl-paste", args: ["--no-newline"] },
+          { cmd: "xclip", args: ["-selection", "clipboard", "-o"] },
+          { cmd: "xsel", args: ["--clipboard", "--output"] },
+        ];
+      }
 
       return Promise.race([
-        new Promise(resolve => {
-          const child = spawn(command, args);
-          let output = "", error = "";
-          child.stdout.on("data", d => output += d.toString());
-          child.stderr.on("data", d => error += d.toString());
-          child.on("close", code => { resolve(code === 0 ? { content: output.trim() } : { error: `Failed to read clipboard. Exit code: ${code}. Error: ${error}` }); });
-          child.on("error", err => resolve({ error: `Failed to spawn clipboard command: ${err.message}` }));
-        }),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("Clipboard operation timeout")), 5000)),
+        tryClipboardCmds(candidates, true),
+        new Promise<Record<string, unknown>>((_, reject) =>
+          setTimeout(() => reject(new Error("Clipboard operation timeout")), 5000)
+        ),
       ]).catch(err => ({ error: err.message }));
     },
   }));
@@ -56,32 +83,29 @@ export function createMiscTools(ctx: ToolContext): Tool[] {
     description: "Write text content to the system clipboard.",
     parameters: { content: z.string() },
     implementation: async ({ content }) => {
-      let command = "";
-      let args: string[] = [];
-      let input = content;
+      let candidates: Array<{ cmd: string; args: string[]; stdin?: string }>;
 
       if (process.platform === "win32") {
-        command = "powershell";
-        const base64Content = Buffer.from(content, "utf8").toString("base64");
-        args = ["-command", `$str = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${base64Content}')); Set-Clipboard -Value $str`];
-        input = "";
+        const b64 = Buffer.from(content, "utf8").toString("base64");
+        candidates = [{
+          cmd: "powershell",
+          args: ["-command", `$str=[System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${b64}')); Set-Clipboard -Value $str`],
+        }];
       } else if (process.platform === "darwin") {
-        command = "pbcopy";
+        candidates = [{ cmd: "pbcopy", args: [], stdin: content }];
       } else {
-        command = "xclip"; args = ["-selection", "clipboard", "-i"];
+        candidates = [
+          { cmd: "wl-copy", args: [], stdin: content },
+          { cmd: "xclip", args: ["-selection", "clipboard", "-i"], stdin: content },
+          { cmd: "xsel", args: ["--clipboard", "--input"], stdin: content },
+        ];
       }
 
       return Promise.race([
-        new Promise(resolve => {
-          const child = spawn(command, args, { stdio: ["pipe", "ignore", "pipe"] });
-          if (input && process.platform !== "win32") { child.stdin.write(input); child.stdin.end(); }
-          else { child.stdin.end(); }
-          let error = "";
-          child.stderr.on("data", d => error += d.toString());
-          child.on("close", code => resolve(code === 0 ? { success: true } : { error: `Failed to write to clipboard. Exit code: ${code}. Error: ${error}` }));
-          child.on("error", err => resolve({ error: `Failed to spawn clipboard command: ${err.message}` }));
-        }),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("Clipboard operation timeout")), 5000)),
+        tryClipboardCmds(candidates, false),
+        new Promise<Record<string, unknown>>((_, reject) =>
+          setTimeout(() => reject(new Error("Clipboard operation timeout")), 5000)
+        ),
       ]).catch(err => ({ error: err.message }));
     },
   }));
@@ -132,28 +156,20 @@ export function createMiscTools(ctx: ToolContext): Tool[] {
       const ext = fpath.split(".").pop()?.toLowerCase();
       try {
         if (ext === "pdf") {
-          if (typeof (global as any).DOMMatrix === "undefined") {
-            (global as any).DOMMatrix = class DOMMatrix {
-              constructor(arg?: any) {
-                (this as any).a = 1; (this as any).b = 0; (this as any).c = 0;
-                (this as any).d = 1; (this as any).e = 0; (this as any).f = 0;
-                if (Array.isArray(arg)) { (this as any).a = arg[0]; (this as any).b = arg[1]; (this as any).c = arg[2]; (this as any).d = arg[3]; (this as any).e = arg[4]; (this as any).f = arg[5]; }
-              }
-            };
-          }
-          const { PDFParse } = require("pdf-parse");
+          // pdf-parse is a CJS module — use require() for consistency with other
+          // native/CJS deps in this codebase (same reason as better-sqlite3).
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const pdfParse = require("pdf-parse") as (buf: Buffer) => Promise<{ text: string; info: Record<string, unknown>; numpages: number }>;
           const dataBuffer = await readFile(fpath);
-          const parser = new PDFParse({ data: dataBuffer });
-          const textResult = await parser.getText();
-          const infoResult = await parser.getInfo();
-          await parser.destroy();
-          return { content: textResult.text, metadata: infoResult.info };
+          const data = await pdfParse(dataBuffer);
+          return { content: data.text, metadata: data.info, pages: data.numpages };
         } else if (ext === "docx") {
+          // mammoth has proper ESM types — dynamic import works fine here.
           const mammoth = await import("mammoth");
           const result = await mammoth.extractRawText({ path: fpath });
           return { content: result.value, messages: result.messages };
         } else {
-          return { error: "Unsupported document format. Use read_file for text files." };
+          return { error: "Unsupported document format. Use read_file for plain text files." };
         }
       } catch (e) {
         return { error: `Failed to read document: ${e instanceof Error ? e.message : String(e)}` };

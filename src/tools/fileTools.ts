@@ -125,7 +125,7 @@ export function createFileTools(ctx: ToolContext): Tool[] {
 
       for (const file of filesToSave) {
         if (!file.file_name?.trim()) { errors.push("Filename cannot be empty"); continue; }
-        if (/[ \*\?<>|"]/.test(file.file_name)) { errors.push(`Filename ${file.file_name} contains invalid characters`); continue; }
+        if (/[\*\?<>|"]/.test(file.file_name)) { errors.push(`Filename ${file.file_name} contains invalid characters (*, ?, <, >, |, ")`); continue; }
         try {
           const filePath = validatePath(ctx.cwd, file.file_name, ctx.protectedPaths);
           await mkdir(dirname(filePath), { recursive: true });

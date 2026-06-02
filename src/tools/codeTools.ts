@@ -11,8 +11,9 @@ import { backgroundCommands, generateId, pruneBackgroundCommands, type Backgroun
 // ─── JavaScript (Deno sandbox) ────────────────────────────────────────────────
 
 export async function runJavascriptImpl({ javascript, timeout_seconds, cwd }: { javascript: string; timeout_seconds?: number; cwd: string }): Promise<{ stdout: string; stderr: string }> {
-  const scriptFileName = `temp_script_${Date.now()}.ts`;
-  const scriptFilePath = join(cwd, scriptFileName);
+  // Write to os.tmpdir() rather than the workspace so temp files never
+  // appear in the user's project and can't be matched by delete_files_by_pattern.
+  const scriptFilePath = join(os.tmpdir(), `lmstoolbox_js_${Date.now()}.ts`);
 
   try {
     await writeFile(scriptFilePath, javascript, "utf-8");
@@ -96,8 +97,7 @@ del _sys, _os
 `;
 
 export async function runPythonImpl({ python, timeout_seconds, cwd }: { python: string; timeout_seconds?: number; cwd: string }): Promise<{ stdout: string; stderr: string }> {
-  const scriptFileName = `temp_script_${Date.now()}.py`;
-  const scriptFilePath = join(cwd, scriptFileName);
+  const scriptFilePath = join(os.tmpdir(), `lmstoolbox_py_${Date.now()}.py`);
 
   // Prepend the sandbox preamble so restrictions are in place before user code runs.
   const fullScript = PYTHON_SANDBOX_PREAMBLE + "\n" + python;
