@@ -92,6 +92,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     "open_file", "preview_html", "read_document",
     "save_memory", "list_memories", "search_memories", "update_memory", "delete_memory",
     "send_notification",
+    "git_pull", "git_push",
   ]);
 
   allTools.sort((a, b) => {

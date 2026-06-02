@@ -127,5 +127,63 @@ export function createGitTools(ctx: ToolContext): Tool[] {
     },
   }));
 
+  tools.push(tool({
+    name: "git_pull",
+    description: "Pull the latest changes from a remote repository into the current branch. Equivalent to `git pull [remote] [branch]`.",
+    parameters: {
+      remote: z.string().optional().default("origin").describe("Remote name to pull from (default: 'origin')."),
+      branch: z.string().optional().describe("Branch to pull (default: current branch)."),
+      rebase: z.boolean().optional().default(false).describe("If true, rebase instead of merge (git pull --rebase)."),
+    },
+    implementation: async ({ remote = "origin", branch, rebase = false }) => {
+      const { simpleGit } = await import("simple-git");
+      const git = simpleGit(ctx.cwd);
+      try {
+        const options: string[] = [];
+        if (rebase) options.push("--rebase");
+        const result = await git.pull(remote, branch ?? undefined, options.length ? options : undefined);
+        return {
+          success: true,
+          summary: result.summary,
+          files: result.files,
+          insertions: result.insertions,
+          deletions: result.deletions,
+        };
+      } catch (e) {
+        return { error: `Git pull failed: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    },
+  }));
+
+  tools.push(tool({
+    name: "git_push",
+    description: "Push committed changes to a remote repository. Equivalent to `git push [remote] [branch]`.",
+    parameters: {
+      remote: z.string().optional().default("origin").describe("Remote name to push to (default: 'origin')."),
+      branch: z.string().optional().describe("Branch to push (default: current branch)."),
+      set_upstream: z.boolean().optional().default(false).describe("If true, sets the upstream tracking reference (git push -u). Use when pushing a new branch for the first time."),
+      force: z.boolean().optional().default(false).describe("If true, force-pushes. Use with caution — this rewrites remote history."),
+    },
+    implementation: async ({ remote = "origin", branch, set_upstream = false, force = false }) => {
+      const { simpleGit } = await import("simple-git");
+      const git = simpleGit(ctx.cwd);
+      try {
+        // Resolve current branch name if none supplied
+        const targetBranch = branch ?? (await git.revparse(["--abbrev-ref", "HEAD"])).trim();
+        const options: Record<string, null | string> = {};
+        if (set_upstream) options["--set-upstream"] = null;
+        if (force) options["--force"] = null;
+        const result = await git.push(remote, targetBranch, options);
+        return {
+          success: true,
+          remote: result.remoteMessages,
+          pushed: result.pushed,
+        };
+      } catch (e) {
+        return { error: `Git push failed: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    },
+  }));
+
   return tools;
 }
