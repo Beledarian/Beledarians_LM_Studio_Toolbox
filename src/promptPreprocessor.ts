@@ -7,7 +7,7 @@ import {
   type PredictionProcessStatusController,
   type PromptPreprocessorController,
 } from "@lmstudio/sdk";
-import { readFile, writeFile } from "fs/promises";
+import { readFile } from "fs/promises";
 import { dirname, join } from "path";
 import { pluginConfigSchematics } from "./config";
 import { TOOLS_DOCUMENTATION, TOOLS_DOCUMENTATION_LITE } from "./toolsDocumentation";
@@ -78,7 +78,7 @@ export async function promptPreprocessor(ctl: PromptPreprocessorController, user
       currentContent = userPrompt;
   }
 
-  // --- Delegation & Safety Instructions (Every Turn) ---
+  // --- Config reads & single state load (one disk read for the entire invocation) ---
   const pluginConfig = ctl.getPluginConfig(pluginConfigSchematics);
   const defaultWorkspacePath = pluginConfig.get("defaultWorkspacePath");
   const frequency = pluginConfig.get("subAgentFrequency");
@@ -88,175 +88,147 @@ export async function promptPreprocessor(ctl: PromptPreprocessorController, user
   const messageLanguage = pluginConfig.get("messageLanguage");
   const rt = getDict(messageLanguage).runtime;
 
-  // Persist uiLanguageOverride to state file so i18n.ts can read it synchronously on next boot.
-  const uiLanguageOverride = pluginConfig.get("uiLanguageOverride");
-  try {
-    const state = await getPersistedState(defaultWorkspacePath);
-    if (state.uiLanguageOverride !== uiLanguageOverride) {
-      state.uiLanguageOverride = uiLanguageOverride;
-      await savePersistedState(state);
-      ctl.debug(`[i18n] uiLanguageOverride saved: "${uiLanguageOverride}". Restart the plugin to apply the new UI language.`);
-    }
-  } catch (e) {
-    ctl.debug("[i18n] Failed to persist uiLanguageOverride.", e);
-  }
+  // Single state read — mutations are accumulated in memory and flushed once at the end.
+  // NOTE: uiLanguageOverride persistence is handled by toolsProvider on plugin startup;
+  //       doing it here on every message is redundant and was removed.
+  const state = await getPersistedState(defaultWorkspacePath);
 
   // --- Plan Mode Instructions ---
   const planMode = pluginConfig.get("planMode");
-  
   let planHint = "";
-  
   if (planMode === "always") {
-      planHint = rt.planHintAlways;
+    planHint = rt.planHintAlways;
   } else if (planMode === "when_useful") {
-      planHint = rt.planHintWhenUseful;
+    planHint = rt.planHintWhenUseful;
   }
 
-
+  // --- Delegation Hint ---
   let delegationHint = "";
-
   if (frequency === "always") {
-      delegationHint = rt.delegationHintAlways;
+    delegationHint = rt.delegationHintAlways;
   } else if (frequency === "when_useful") {
-      delegationHint = rt.delegationHintWhenUseful;
-      
-      if (debugMode) {
-          delegationHint += rt.delegationHintWhenUsefulDebug;
-      }
-
+    delegationHint = rt.delegationHintWhenUseful;
+    if (debugMode) {
+      delegationHint += rt.delegationHintWhenUsefulDebug;
+    }
   } else if (frequency === "hard_tasks") {
-      delegationHint = rt.delegationHintHardTasks;
+    delegationHint = rt.delegationHintHardTasks;
   }
 
-  // Append the hint to the user message (effective system instruction for this turn)
   if (delegationHint) {
-      currentContent += delegationHint;
+    currentContent += delegationHint;
   }
-
-  // Append plan hint if enabled
   if (planHint) {
-      currentContent += planHint;
+    currentContent += planHint;
   }
-
 
   // --- Sub-Agent Documentation Injection (Startup OR On-Enable) ---
   const enableSecondary = pluginConfig.get("enableSecondaryAgent");
-  const state = await getPersistedState(defaultWorkspacePath);
 
-  // Reset the injection flag on the first turn of a new conversation
+  // Reset the injection flag on the first turn of a new conversation (in memory only).
   if (isFirstTurn) {
-      state.subAgentDocsInjected = false;
-      await savePersistedState(state);
+    state.subAgentDocsInjected = false;
   }
 
   if (enableSecondary && !state.subAgentDocsInjected) {
-      const { currentWorkingDirectory } = state;
-      const candidatePaths = getSubAgentDocsCandidatePaths(currentWorkingDirectory);
+    const { currentWorkingDirectory } = state;
+    const candidatePaths = getSubAgentDocsCandidatePaths(currentWorkingDirectory);
 
-      let docsInjected = false;
-      for (const subAgentDocsPath of candidatePaths) {
-          try {
-              const docsContent = await readFile(subAgentDocsPath, "utf-8");
-              if (docsContent && docsContent.trim().length > 0) {
-                  // Prepend or Append? Append to ensure it's fresh context.
-                  currentContent += `\n\n---\n\n${docsContent}\n\n---\n\n`;
-                  ctl.debug(`subagent_docs.md injected into context from: ${subAgentDocsPath}`);
-
-                  // Update state so we don't inject again for this session/workspace
-                  state.subAgentDocsInjected = true;
-                  await savePersistedState(state);
-                  docsInjected = true;
-                  break;
-              }
-          } catch (e) {
-              // Keep trying fallback paths.
-          }
+    let docsInjected = false;
+    for (const subAgentDocsPath of candidatePaths) {
+      try {
+        const docsContent = await readFile(subAgentDocsPath, "utf-8");
+        if (docsContent && docsContent.trim().length > 0) {
+          currentContent += `\n\n---\n\n${docsContent}\n\n---\n\n`;
+          ctl.debug(`subagent_docs.md injected into context from: ${subAgentDocsPath}`);
+          state.subAgentDocsInjected = true;
+          docsInjected = true;
+          break;
+        }
+      } catch (e) {
+        // Keep trying fallback paths.
       }
+    }
 
-      if (!docsInjected) {
-          ctl.debug("subagent_docs.md not found or failed to load from plugin/workspace paths. Skipping injection.");
-      }
+    if (!docsInjected) {
+      ctl.debug("subagent_docs.md not found or failed to load from plugin/workspace paths. Skipping injection.");
+    }
   }
 
-  // 2. Tools Documentation & Memory Injection (Startup Only)
+  // --- Tools Documentation & Startup File Injection (First Turn Only) ---
   if (isFirstTurn) {
     const simpleSystemPrompt = pluginConfig.get("simpleSystemPrompt");
     let injectionContent = simpleSystemPrompt ? TOOLS_DOCUMENTATION_LITE : TOOLS_DOCUMENTATION;
 
     try {
-        const { currentWorkingDirectory } = state;
-        const candidateStartupPaths = [
-            join(currentWorkingDirectory, ".beledarian", "startup.md"),
-            join(currentWorkingDirectory, "instructions", "startup.md"),
-            join(currentWorkingDirectory, "startup.md"),
-        ];
+      const { currentWorkingDirectory } = state;
+      const candidateStartupPaths = [
+        join(currentWorkingDirectory, ".beledarian", "startup.md"),
+        join(currentWorkingDirectory, "instructions", "startup.md"),
+        join(currentWorkingDirectory, "startup.md"),
+      ];
 
-        let startupContent = "";
-        let usedStartupPath = "";
-        for (const startupPath of candidateStartupPaths) {
+      let startupContent = "";
+      let usedStartupPath = "";
+      for (const startupPath of candidateStartupPaths) {
+        try {
+          startupContent = await readFile(startupPath, "utf-8");
+          usedStartupPath = dirname(startupPath);
+          ctl.debug(`startup.md loaded from: ${startupPath}`);
+          break;
+        } catch (e) {
+          // Keep trying
+        }
+      }
+
+      if (startupContent) {
+        const filesToRead = startupContent.split('\n').map(f => f.trim()).filter(f => f);
+
+        for (const file of filesToRead) {
+          // Try relative to startup.md folder first, then relative to CWD
+          const candidateFilePaths = [
+            join(usedStartupPath, file),
+            join(currentWorkingDirectory, file),
+          ];
+
+          let loaded = false;
+          for (const filePath of candidateFilePaths) {
             try {
-                startupContent = await readFile(startupPath, "utf-8");
-                usedStartupPath = dirname(startupPath);
-                ctl.debug(`startup.md loaded from: ${startupPath}`);
+              const fileContent = await readFile(filePath, "utf-8");
+              if (fileContent.trim().length > 0) {
+                injectionContent = `\n\n---\n\n${fileContent}\n\n---\n\n${injectionContent}`;
+                ctl.debug(`${file} loaded and injected into context from ${filePath}.`);
+                loaded = true;
                 break;
+              }
             } catch (e) {
-                // Keep trying
+              // Keep trying
             }
+          }
+          if (!loaded) {
+            ctl.debug(`Failed to load ${file} from startup.md.`);
+          }
         }
-
-        if (startupContent) {
-            const filesToRead = startupContent.split('\n').map(f => f.trim()).filter(f => f);
-
-            for (const file of filesToRead) {
-                // Try relative to startup.md folder first, then relative to CWD
-                const candidateFilePaths = [
-                    join(usedStartupPath, file),
-                    join(currentWorkingDirectory, file),
-                ];
-
-                let loaded = false;
-                for (const filePath of candidateFilePaths) {
-                    try {
-                        const fileContent = await readFile(filePath, "utf-8");
-                        if (fileContent.trim().length > 0) {
-                            injectionContent = `\n\n---\n\n${fileContent}\n\n---\n\n${injectionContent}`;
-                            ctl.debug(`${file} loaded and injected into context from ${filePath}.`);
-                            loaded = true;
-                            break;
-                        }
-                    } catch (e) {
-                        // Keep trying
-                    }
-                }
-                if (!loaded) {
-                    ctl.debug(`Failed to load ${file} from startup.md.`);
-                }
-            }
-        }
+      }
     } catch (e) {
-        ctl.debug("No startup.md file found or failed to load.");
+      ctl.debug("No startup.md file found or failed to load.");
     }
 
     currentContent = `${injectionContent}\n\n---\n\n${currentContent}`;
   }
 
-  // Return the final content string if it changed, otherwise the original message
-  // (The SDK expects a string to replace content, or the message object)
-  if (currentContent !== userPrompt) {
-      return currentContent;
-  }
-
-  // Update message count and memory
+  // Always increment message count and flush all state mutations in a single write.
+  state.messageCount++;
   try {
-    state.messageCount++;
     await savePersistedState(state);
-
-    // Auto-summary disabled due to SDK type mismatch
-    // if (state.messageCount % 10 === 0) { ... }
   } catch (e) {
-    ctl.debug("Failed to update message count or memory.", e);
+    ctl.debug("Failed to persist plugin state.", e);
   }
-  
+
+  // Return modified content string, or the original message object if nothing changed.
+  if (currentContent !== userPrompt) {
+    return currentContent;
+  }
   return userMessage;
 }
 
