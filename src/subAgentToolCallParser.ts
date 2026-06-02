@@ -91,8 +91,9 @@ function normalizeToolName(value: unknown): string | null {
     "list_dir": "list_directory",
     "ls": "list_directory",
     "find_file": "find_files",
-    "search_file": "search_file_content",
-    "grep": "search_file_content",
+    "search_file": "search_in_file",
+    "grep": "search_in_file",
+    "search_file_content": "search_in_file",  // old alias that was mapped to a non-existent tool
     "replace_text": "replace_text_in_file",
     "replace_in_file": "replace_text_in_file"
   };
@@ -123,8 +124,8 @@ function normalizeArgs(toolName: string, args: unknown): Record<string, any> {
 
   // Generic path/data normalization for file tools
   const fileTools = [
-    "read_file", "save_file", "replace_text_in_file", "read_file_range", 
-    "search_file_content", "search_in_file", "insert_at_line", 
+    "read_file", "save_file", "replace_text_in_file", "read_file_range",
+    "search_in_file", "insert_at_line",
     "append_file", "delete_lines_in_file"
   ];
   
@@ -157,7 +158,7 @@ function normalizeArgs(toolName: string, args: unknown): Record<string, any> {
     result.query = result.pattern;
   }
   
-  if ((toolName === "search_file_content" || toolName === "search_in_file") && !result.pattern && result.query) {
+  if (toolName === "search_in_file" && !result.pattern && result.query) {
     result.pattern = result.query;
   }
 

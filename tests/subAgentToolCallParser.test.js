@@ -624,3 +624,36 @@ test("iteration count logging helps diagnose timeout vs iteration issues", () =>
   // All these logs help diagnose what happened during the loop
   assert.ok(logMessages.length > 0, "Debug logging provides visibility into loop behavior");
 });
+
+// ─── BUG-2: search_file_content was mapped to a non-existent tool ───────────
+
+test("'grep' alias resolves to search_in_file (not search_file_content)", () => {
+  const parsed = parseSubAgentResponseMessage({
+    content: '{"tool": "grep", "args": {"file_name": "src/index.ts", "pattern": "export"}}',
+  });
+  assert.equal(parsed.toolCall?.tool, "search_in_file", "grep should map to search_in_file");
+});
+
+test("'search_file' alias resolves to search_in_file", () => {
+  const parsed = parseSubAgentResponseMessage({
+    content: '{"tool": "search_file", "args": {"file_name": "app.py", "pattern": "def main"}}',
+  });
+  assert.equal(parsed.toolCall?.tool, "search_in_file");
+});
+
+test("'search_file_content' alias resolves to search_in_file", () => {
+  const parsed = parseSubAgentResponseMessage({
+    content: '{"tool": "search_file_content", "args": {"file_name": "main.rs", "query": "fn main"}}',
+  });
+  // Should be remapped AND have pattern normalised from query
+  assert.equal(parsed.toolCall?.tool, "search_in_file");
+  assert.equal(parsed.toolCall?.args.pattern, "fn main");
+});
+
+test("'search_in_file' with query instead of pattern gets pattern normalised", () => {
+  const parsed = parseSubAgentResponseMessage({
+    content: '{"tool": "search_in_file", "args": {"file_name": "foo.ts", "query": "import"}}',
+  });
+  assert.equal(parsed.toolCall?.tool, "search_in_file");
+  assert.equal(parsed.toolCall?.args.pattern, "import");
+});
