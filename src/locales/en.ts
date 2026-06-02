@@ -153,6 +153,11 @@ export const en: LocaleDict = {
       subtitle:
         "Maximum time allowed for sub-agent tasks before forced termination. Default: 600s (10 mins).",
     },
+    subAgentTemperature: {
+      displayName: "Sub-Agent Temperature",
+      subtitle:
+        "Sampling temperature for sub-agent LLM calls (0 = deterministic, 2 = very creative). Lower values (0.2–0.5) produce more consistent, reliable code. Default: 0.4.",
+    },
 
     enableDebugMode: {
       displayName: "Enable Auto-Debug Mode",

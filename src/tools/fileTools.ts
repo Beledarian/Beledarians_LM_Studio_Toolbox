@@ -385,11 +385,13 @@ export function createFileTools(ctx: ToolContext): Tool[] {
       directory_path: z.string().optional().describe("Directory to search. Defaults to workspace root."),
       pattern: z.string().describe("Regex pattern or string to search for"),
       use_regex: z.boolean().optional().default(false),
+      case_sensitive: z.boolean().optional().default(false).describe("Whether the search is case-sensitive. Default: false."),
     },
-    implementation: async ({ directory_path, pattern, use_regex }) => {
+    implementation: async ({ directory_path, pattern, use_regex, case_sensitive = false }) => {
       try {
         const targetDir = directory_path ? validatePath(ctx.cwd, directory_path) : ctx.cwd;
-        const regex = new RegExp(use_regex ? pattern : pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+        const flags = case_sensitive ? "g" : "gi";
+        const regex = new RegExp(use_regex ? pattern : pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), flags);
         const results: string[] = [];
         let searchedCount = 0;
 

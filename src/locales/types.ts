@@ -46,6 +46,7 @@ export interface LocaleDict {
     subAgentAllowCode: { displayName: string; subtitle: string };
     subAgentAllowBrowserControl: { displayName: string; subtitle: string };
     subAgentTimeLimit: { displayName: string; subtitle: string };
+    subAgentTemperature: { displayName: string; subtitle: string };
 
     enableDebugMode: { displayName: string; subtitle: string };
     enableSubAgentDebugLogging: { displayName: string; subtitle: string };

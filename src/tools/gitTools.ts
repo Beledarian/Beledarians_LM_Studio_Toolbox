@@ -178,6 +178,7 @@ export function createGitTools(ctx: ToolContext): Tool[] {
           success: true,
           remote: result.remoteMessages,
           pushed: result.pushed,
+          ...(force && { warning: "Force-push was used. Remote history has been rewritten." }),
         };
       } catch (e) {
         return { error: `Git push failed: ${e instanceof Error ? e.message : String(e)}` };

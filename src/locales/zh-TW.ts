@@ -134,6 +134,10 @@ export const zhTW: LocaleDict = {
       displayName: "子智能體時間限制（秒）",
       subtitle: "子智能體任務強制終止前的最長時間。預設：600 秒（10 分鐘）。",
     },
+    subAgentTemperature: {
+      displayName: "子智能體溫度",
+      subtitle: "子智能體 LLM 呼叫的採樣溫度（0 = 確定性，2 = 非常有創意）。較低的值（0.2–0.5）可產生更穩定、可靠的程式碼。預設：0.4。",
+    },
     enableDebugMode: {
       displayName: "啟用自動偵錯模式",
       subtitle: "啟用後，委派給子智能體的程式設計任務將自動觸發「審查員」二次檢查。",

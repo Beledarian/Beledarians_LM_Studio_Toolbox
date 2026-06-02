@@ -12,6 +12,8 @@ import { executeBrowserActions } from "../browserActions";
 import { runPythonImpl, runJavascriptImpl } from "./codeTools";
 
 const MAX_SUB_AGENT_OUTPUT_CHARS = 30_000;
+/** Timeout (ms) applied to all external web fetch calls inside the sub-agent. */
+const WEB_FETCH_TIMEOUT_MS = 15_000;
 
 /**
  * Strip HTML tags, scripts, styles and decode common entities so that
@@ -56,6 +58,7 @@ export function createSubAgentTools(ctx: ToolContext): Tool[] {
         }
 
         const subAgentProfilesStr: string = ctx.pluginConfig.get("subAgentProfiles");
+        const subAgentTemperature: number = ctx.pluginConfig.get("subAgentTemperature") ?? 0.4;
         const debugMode: boolean = ctx.pluginConfig.get("enableDebugMode");
         const subAgentDebugLogging: boolean = ctx.pluginConfig.get("enableSubAgentDebugLogging");
         const autoSave: boolean = ctx.pluginConfig.get("subAgentAutoSave");
@@ -140,7 +143,7 @@ export function createSubAgentTools(ctx: ToolContext): Tool[] {
               const response = await fetch(`${endpoint}/chat/completions`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ model: modelId, messages: msgList, temperature: 0.7, stream: false }),
+                body: JSON.stringify({ model: modelId, messages: msgList, temperature: subAgentTemperature, stream: false }),
               });
 
               if (!response.ok) {
@@ -363,10 +366,11 @@ export function createSubAgentTools(ctx: ToolContext): Tool[] {
                       if (toolCall.tool === "wikipedia_search") {
                         const lang = args.lang || "en";
                         const q = args.query || "";
-                        const searchData = await (await fetch(`https://${lang}.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(q)}&format=json`)).json();
+                        const wikiSignal = AbortSignal.timeout(WEB_FETCH_TIMEOUT_MS);
+                        const searchData = await (await fetch(`https://${lang}.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(q)}&format=json`, { signal: wikiSignal })).json();
                         if (searchData.query?.search?.length) {
                           const item = searchData.query.search[0];
-                          const pageData = await (await fetch(`https://${lang}.wikipedia.org/w/api.php?action=query&prop=extracts&exintro&explaintext&pageids=${item.pageid}&format=json`)).json();
+                          const pageData = await (await fetch(`https://${lang}.wikipedia.org/w/api.php?action=query&prop=extracts&exintro&explaintext&pageids=${item.pageid}&format=json`, { signal: AbortSignal.timeout(WEB_FETCH_TIMEOUT_MS) })).json();
                           const page = pageData.query.pages[item.pageid];
                           toolResult = page.extract.substring(0, 3000);
                         } else {
@@ -375,12 +379,12 @@ export function createSubAgentTools(ctx: ToolContext): Tool[] {
                       } else if (toolCall.tool === "web_search" || toolCall.tool === "duckduckgo_search") {
                         const { search, SafeSearchType } = await import("duck-duck-scrape");
                         const r = await search(args.query, { safeSearch: SafeSearchType.OFF });
-                        toolResult = JSON.stringify(r.results.slice(0, 3));
+                        toolResult = JSON.stringify(r.results.slice(0, 5));
                       } else if (toolCall.tool === "fetch_web_content" && args.url) {
                         if (!args.url.startsWith("http://") && !args.url.startsWith("https://")) {
                           toolResult = "Error: URL must start with http:// or https://";
                         } else {
-                          const res = await fetch(args.url);
+                          const res = await fetch(args.url, { signal: AbortSignal.timeout(WEB_FETCH_TIMEOUT_MS) });
                           const plainText = htmlToPlainText(await res.text());
                           toolResult = plainText.length > 8000
                             ? `${plainText.substring(0, 8000)}\n... (truncated)`
@@ -446,7 +450,7 @@ export function createSubAgentTools(ctx: ToolContext): Tool[] {
                       } else if (!ctx.client) {
                         toolResult = "Error: LM Studio client unavailable for RAG.";
                       } else {
-                        const res = await fetch(args.url);
+                        const res = await fetch(args.url, { signal: AbortSignal.timeout(WEB_FETCH_TIMEOUT_MS) });
                         const plainText = htmlToPlainText(await res.text());
                         const { performRagOnText } = await import("./helpers");
                         const topChunks = await performRagOnText(plainText, args.query, ctx.client, ctx.embeddingModelName);

@@ -161,6 +161,11 @@ export const zhCN: LocaleDict = {
       subtitle:
         "子智能体任务强制终止前的最长运行时间。默认：600 秒（10 分钟）。",
     },
+    subAgentTemperature: {
+      displayName: "子智能体温度",
+      subtitle:
+        "子智能体 LLM 调用的采样温度（0 = 确定性，2 = 非常有创意）。较低的值（0.2–0.5）可生成更稳定、更可靠的代码。默认：0.4。",
+    },
     enableDebugMode: {
       displayName: "启用自动调试模式",
       subtitle:

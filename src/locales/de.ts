@@ -134,6 +134,10 @@ export const de: LocaleDict = {
       displayName: "Sub-Agenten-Zeitlimit (Sekunden)",
       subtitle: "Maximale Zeit für Sub-Agenten-Aufgaben vor erzwungener Beendigung. Standard: 600 s (10 Min.).",
     },
+    subAgentTemperature: {
+      displayName: "Sub-Agenten-Temperatur",
+      subtitle: "Sampling-Temperatur für Sub-Agenten-LLM-Aufrufe (0 = deterministisch, 2 = sehr kreativ). Niedrigere Werte (0,2–0,5) erzeugen konsistenteren, zuverlässigeren Code. Standard: 0,4.",
+    },
     enableDebugMode: {
       displayName: "Auto-Debug-Modus aktivieren",
       subtitle: "Wenn aktiviert, lösen an Sub-Agenten delegierte Coding-Aufgaben automatisch einen zweiten 'Reviewer'-Durchlauf aus.",

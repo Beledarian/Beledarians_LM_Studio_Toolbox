@@ -173,6 +173,12 @@ export const pluginConfigSchematics = createConfigSchematics()
     displayName: c.subAgentTimeLimit.displayName,
     subtitle: c.subAgentTimeLimit.subtitle,
   }, 600)
+  .field("subAgentTemperature", "numeric", {
+    min: 0,
+    max: 2,
+    displayName: c.subAgentTemperature.displayName,
+    subtitle: c.subAgentTemperature.subtitle,
+  }, 0.4)
 
   // ── Debug / Output ─────────────────────────────────────────────────────────
   .field("enableDebugMode", "boolean", {
