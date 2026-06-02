@@ -33,6 +33,12 @@ module.exports = tseslint.config(
       // Empty catch blocks with a comment are intentional in this codebase
       // (e.g. "Keep trying fallback paths"). The default rule would flag them.
       "no-empty": ["error", { allowEmptyCatch: false }],
+
+      // The browser evaluate action in browserActions.ts intentionally uses
+      // Function() to run arbitrary scripts inside a sandboxed Puppeteer page.
+      // That single call site carries an eslint-disable comment; all other
+      // uses of the Function constructor should be flagged.
+      "no-new-func": "error",
     },
   },
 );

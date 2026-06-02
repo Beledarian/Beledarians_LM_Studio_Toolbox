@@ -15,16 +15,19 @@ constrain.
 | Python sandbox | `run_python` uses `sys.addaudithook` (Python 3.8+) to block network access, subprocess spawning, and writes outside the workspace. Reads are unrestricted (needed for stdlib imports). |
 | JavaScript sandbox | `run_javascript` runs inside Deno with explicit deny flags: no network, no env, no sys, no subprocess, fs restricted to CWD. |
 | Sub-agent time limit | The secondary agent loop is bounded by the **Sub-Agent Time Limit** config (default 600 s). The deadline is enforced on every iteration and on all outbound web fetches within the loop. |
-| Path traversal guard | Most file tools validate paths with `validatePath()`, which prevents traversal outside the current working directory via `..` or absolute paths. |
+| Path traversal guard | All file tools validate paths with `validatePath()`, which prevents traversal outside the current working directory via `..` or absolute paths. |
+| Protected paths | The `protectedPaths` config (newline- or comma-separated absolute paths) is parsed at startup and checked by `validatePath()` and `change_directory`. Any path within a protected directory is denied regardless of CWD. |
+| SSRF prevention | `fetch_web_content`, `rag_web_content`, and `wikipedia_search` route through `safeFetch()`, which blocks loopback (`127.x.x.x`, `::1`, `localhost`), RFC-1918 private ranges, link-local / cloud-metadata addresses (`169.254.x.x`, `fe80::/10`), and non-http(s) schemes. |
+| Browser URL schemes | `browser_session_open` and `browser_open_page` reject non-http(s) URLs, blocking `file://` and other schemes from being loaded in the headless browser. |
+| `query_database` write prevention | `INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `CREATE`, `REPLACE`, `ATTACH`, `DETACH`, and `PRAGMA` are all blocked. Prevents both data modification and cross-file reads via `ATTACH DATABASE`. |
 
 ### What is NOT a hard security boundary
 
 | Feature | Reality |
 |---|---|
-| `change_directory` | Intentionally unrestricted — the model must be able to `cd ..` and navigate to absolute paths. After changing directory, all subsequent file operations are validated against the **new** CWD. Do not rely on workspace isolation if the model can change directory. |
-| `protectedPaths` config | **Not yet enforced** — the config field is visible in settings but the enforcement code is not yet implemented (planned for a future release). Do not rely on it for security. |
-| Web / browser tools | `fetch_web_content`, `rag_web_content`, `browser_session_open`, and the search providers have no SSRF protection and will follow any URL, including `http://localhost`, RFC-1918 addresses, and cloud-metadata endpoints. Only enable browser control if you trust the model's URL choices. |
-| `query_database` | Restricted to SELECT-like statements by prefix check, but does not block `ATTACH DATABASE` or cross-file reads. Limit this to databases the model should actually read. |
+| `change_directory` | Intentionally unrestricted — the model must be able to `cd ..` and navigate to absolute paths. After changing directory, all subsequent file operations are validated against the **new** CWD. Configure `protectedPaths` to block specific directories absolutely. |
+| Browser tools (SSRF) | `browser_session_open` and `browser_open_page` accept any http(s) URL including `http://localhost` and RFC-1918 addresses — the SSRF guard applies only to Node-side `fetch()` calls, not to Puppeteer navigations. Only enable browser control if you trust the model's URL choices. |
+| `execute_command` / `run_in_terminal` | Shell commands are entirely unrestricted — no path filtering, no network blocking. Only enable if you trust the model completely. |
 
 ### Dependency vulnerabilities
 
