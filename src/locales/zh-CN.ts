@@ -97,7 +97,7 @@ export const zhCN: LocaleDict = {
     enableMemory: {
       displayName: "启用记忆功能",
       subtitle:
-        "启用后，模型可从工作区的 'memory.md' 文件中保存和读取信息，实现长期记忆。",
+        "启用后，模型可使用持久化 SQLite 记忆数据库保存和检索信息（save_memory、list_memories、search_memories、update_memory、delete_memory）。",
     },
     enableWikipediaTool: {
       displayName: "启用维基百科搜索",

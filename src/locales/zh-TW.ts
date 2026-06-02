@@ -80,7 +80,7 @@ export const zhTW: LocaleDict = {
     },
     enableMemory: {
       displayName: "啟用記憶",
-      subtitle: "啟用後，模型可從工作區的 'memory.md' 檔案中儲存和讀取資訊。",
+      subtitle: "啟用後，模型可使用持久化 SQLite 記憶資料庫儲存和檢索資訊（save_memory、list_memories、search_memories、update_memory、delete_memory）。",
     },
     enableWikipediaTool: {
       displayName: "啟用維基百科工具",

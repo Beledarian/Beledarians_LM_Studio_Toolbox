@@ -285,13 +285,11 @@ export function createCodeTools(ctx: ToolContext): Tool[] {
     `,
     parameters: {
       command: z.string(),
-      timeout_hours: z.number().max(10).describe("MANDATORY: How long the process is allowed to run before being killed."),
+      timeout_hours: z.number().min(0.01).max(10).describe("MANDATORY: How long the process is allowed to run before being killed (minimum 0.01 hours = ~36 seconds)."),
       name: z.string().describe("MANDATORY: A short, descriptive name for the background task (e.g. 'Vite Dev Server')"),
     },
     implementation: async ({ command, timeout_hours, name }) => {
       try {
-        if (!timeout_hours) return { error: "timeout_hours is MANDATORY" };
-        if (!name) return { error: "name is MANDATORY" };
         pruneBackgroundCommands();
 
         const timeoutMs = timeout_hours * 60 * 60 * 1000;
