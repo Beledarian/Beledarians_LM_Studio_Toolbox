@@ -102,3 +102,45 @@ export function getDenoPath(): string {
   const utilPath = join(lmstudioHome, ".internal", "utils");
   return join(utilPath, process.platform === "win32" ? "deno.exe" : "deno");
 }
+
+// ─── Python Runtime ───────────────────────────────────────────────────────────
+
+let _cachedPythonPath: string | null = null;
+
+/**
+ * Resolve the Python 3 binary on the current platform, caching the result.
+ * Tries `python3` first (macOS/Linux), then `python` (Windows / some distros).
+ * Throws if no Python 3 interpreter is found.
+ */
+export async function getPythonPath(): Promise<string> {
+  if (_cachedPythonPath) return _cachedPythonPath;
+
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { execFile } = require("child_process") as typeof import("child_process");
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { promisify } = require("util") as typeof import("util");
+  const execFileAsync = promisify(execFile);
+
+  const candidates = process.platform === "win32"
+    ? ["python", "python3"]   // Windows usually has "python" from Store / pyenv
+    : ["python3", "python"];  // Unix: prefer explicit python3
+
+  for (const candidate of candidates) {
+    try {
+      const { stdout, stderr } = await execFileAsync(candidate, ["--version"]);
+      // Python 2 prints to stderr; Python 3 prints to stdout.
+      const version = (stdout + stderr).trim();
+      if (version.startsWith("Python 3")) {
+        _cachedPythonPath = candidate;
+        return candidate;
+      }
+    } catch {
+      // Not found or not executable — try next candidate.
+    }
+  }
+
+  throw new Error(
+    "Python 3 interpreter not found. " +
+    "Install Python 3 and ensure 'python3' or 'python' is on your PATH."
+  );
+}

@@ -5,7 +5,7 @@ import { writeFile, rm } from "fs/promises";
 import { join } from "path";
 import * as os from "os";
 import type { ToolContext } from "./context";
-import { createSafeToolImplementation, getDenoPath } from "./helpers";
+import { createSafeToolImplementation, getDenoPath, getPythonPath } from "./helpers";
 import { backgroundCommands, generateId, pruneBackgroundCommands, type BackgroundCommand } from "../backgroundCommands";
 
 // ─── JavaScript (Deno sandbox) ────────────────────────────────────────────────
@@ -43,14 +43,76 @@ export async function runJavascriptImpl({ javascript, timeout_seconds, cwd }: { 
 
 // ─── Python ───────────────────────────────────────────────────────────────────
 
+/**
+ * Preamble injected before every user Python script.
+ *
+ * Uses sys.addaudithook (Python 3.8+) — once registered, audit hooks cannot be
+ * removed by user code, so the restrictions cannot be bypassed at runtime.
+ *
+ * Restrictions (mirrors the Deno sandbox used for run_javascript):
+ *   - Network blocked: socket creation, DNS, urllib requests
+ *   - Subprocess blocked: subprocess.Popen, os.system, os.popen, os.exec*
+ *   - File writes restricted to the workspace directory (CWD at script start)
+ *   - File reads are unrestricted (Python stdlib imports need to read .py files)
+ *
+ * All sandbox variables are captured as function default-argument values so
+ * they remain valid after the module-global names are deleted, preventing user
+ * code from tampering with them by name.
+ */
+const PYTHON_SANDBOX_PREAMBLE = `\
+import sys as _sys, os as _os
+
+if _sys.version_info >= (3, 8):
+    def _sandbox_audit(event, args,
+                       _blocked=frozenset({
+                           "subprocess.Popen",
+                           "os.system", "os.popen",
+                           "os.execv", "os.execve", "os.execvp", "os.execvpe",
+                           "socket.__new__",
+                           "socket.getaddrinfo", "socket.gethostbyname",
+                           "socket.connect",
+                           "urllib.Request",
+                       }),
+                       _workspace=_os.path.abspath("."),
+                       _sep=_os.sep,
+                       _realpath=_os.path.realpath,
+                       _abspath=_os.path.abspath):
+        if event in _blocked:
+            raise PermissionError(f"[sandbox] '{event}' is not allowed in sandboxed Python")
+        if event == "open" and args:
+            path = str(args[0])
+            mode = str(args[1]) if len(args) > 1 else "r"
+            if any(c in mode for c in "wax"):
+                abs_path = _realpath(_abspath(path))
+                if not (abs_path == _workspace or abs_path.startswith(_workspace + _sep)):
+                    raise PermissionError(
+                        f"[sandbox] Writing outside workspace not allowed: {path}"
+                    )
+    _sys.addaudithook(_sandbox_audit)
+    del _sandbox_audit
+
+del _sys, _os
+# ── end sandbox ──────────────────────────────────────────────────────────────
+`;
+
 export async function runPythonImpl({ python, timeout_seconds, cwd }: { python: string; timeout_seconds?: number; cwd: string }): Promise<{ stdout: string; stderr: string }> {
   const scriptFileName = `temp_script_${Date.now()}.py`;
   const scriptFilePath = join(cwd, scriptFileName);
 
-  try {
-    await writeFile(scriptFilePath, python, "utf-8");
+  // Prepend the sandbox preamble so restrictions are in place before user code runs.
+  const fullScript = PYTHON_SANDBOX_PREAMBLE + "\n" + python;
 
-    const childProcess = spawn("python", [scriptFilePath], {
+  let pythonBin: string;
+  try {
+    pythonBin = await getPythonPath();
+  } catch (e) {
+    return { stdout: "", stderr: e instanceof Error ? e.message : String(e) };
+  }
+
+  try {
+    await writeFile(scriptFilePath, fullScript, "utf-8");
+
+    const childProcess = spawn(pythonBin, [scriptFilePath], {
       cwd, timeout: (timeout_seconds ?? 5) * 1000, stdio: "pipe",
     });
 
@@ -102,16 +164,20 @@ export function createCodeTools(ctx: ToolContext): Tool[] {
   tools.push(tool({
     name: "run_python",
     description: text`
-      Run a Python code snippet. You cannot import external modules but you have
-      read/write access to the current working directory.
+      Run a Python 3 code snippet in a sandboxed environment.
+
+      Sandbox restrictions (Python 3.8+):
+        - Network access is blocked (socket creation, DNS, urllib requests).
+        - Subprocess spawning is blocked (subprocess, os.system, os.exec*).
+        - File writes are restricted to the current working directory.
+        - File reads are unrestricted (needed for stdlib imports).
+        - Standard library modules (math, json, re, datetime, etc.) work normally.
 
       Pass the code you wish to run as a string in the 'python' parameter.
+      Print output with print() — stdout and stderr are both returned.
 
       By default, the code will timeout in 5 seconds. You can extend this timeout by setting the
       'timeout_seconds' parameter to a higher value in seconds, up to a maximum of 60 seconds.
-
-      You will get the stdout and stderr output of the code execution, thus please print the output
-      you wish to return using 'print()'.
     `,
     parameters: { python: z.string(), timeout_seconds: z.number().min(0.1).max(60).optional() },
     implementation: createSafeToolImplementation(
