@@ -59,6 +59,7 @@ export function createSubAgentTools(ctx: ToolContext): Tool[] {
 
         const subAgentProfilesStr: string = ctx.pluginConfig.get("subAgentProfiles");
         const subAgentTemperature: number = ctx.pluginConfig.get("subAgentTemperature") ?? 0.4;
+        const subAgentTimeLimitSec: number = ctx.pluginConfig.get("subAgentTimeLimit") ?? 600;
         const debugMode: boolean = ctx.pluginConfig.get("enableDebugMode");
         const subAgentDebugLogging: boolean = ctx.pluginConfig.get("enableSubAgentDebugLogging");
         const autoSave: boolean = ctx.pluginConfig.get("subAgentAutoSave");
@@ -77,6 +78,7 @@ export function createSubAgentTools(ctx: ToolContext): Tool[] {
           loopLimit = 8,
           forceTools = false,
           cwd: string,
+          deadlineMs: number = Date.now() + subAgentTimeLimitSec * 1000,
         ) => {
           let currentSystemPrompt = "You are a helpful assistant.";
 
@@ -139,11 +141,19 @@ export function createSubAgentTools(ctx: ToolContext): Tool[] {
           const suggestedReadPath = allowFileSystem ? extractLikelyFilePath(`${taskPrompt}\n${contextData}`) : null;
 
           while (loops < loopLimit) {
+            // ── Wall-clock deadline check (enforces subAgentTimeLimit config) ──
+            const remainingMs = deadlineMs - Date.now();
+            if (remainingMs <= 0) {
+              if (subAgentDebugLogging) console.log(`[Sub-Agent] Time limit of ${subAgentTimeLimitSec}s exceeded after ${loops} loop(s).`);
+              return { error: `Sub-agent time limit (${subAgentTimeLimitSec}s) exceeded.`, filesModified };
+            }
+
             try {
               const response = await fetch(`${endpoint}/chat/completions`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ model: modelId, messages: msgList, temperature: subAgentTemperature, stream: false }),
+                signal: AbortSignal.timeout(remainingMs),
               });
 
               if (!response.ok) {
@@ -366,11 +376,11 @@ export function createSubAgentTools(ctx: ToolContext): Tool[] {
                       if (toolCall.tool === "wikipedia_search") {
                         const lang = args.lang || "en";
                         const q = args.query || "";
-                        const wikiSignal = AbortSignal.timeout(WEB_FETCH_TIMEOUT_MS);
+                        const wikiSignal = AbortSignal.timeout(Math.min(WEB_FETCH_TIMEOUT_MS, deadlineMs - Date.now()));
                         const searchData = await (await fetch(`https://${lang}.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(q)}&format=json`, { signal: wikiSignal })).json();
                         if (searchData.query?.search?.length) {
                           const item = searchData.query.search[0];
-                          const pageData = await (await fetch(`https://${lang}.wikipedia.org/w/api.php?action=query&prop=extracts&exintro&explaintext&pageids=${item.pageid}&format=json`, { signal: AbortSignal.timeout(WEB_FETCH_TIMEOUT_MS) })).json();
+                          const pageData = await (await fetch(`https://${lang}.wikipedia.org/w/api.php?action=query&prop=extracts&exintro&explaintext&pageids=${item.pageid}&format=json`, { signal: AbortSignal.timeout(Math.min(WEB_FETCH_TIMEOUT_MS, deadlineMs - Date.now())) })).json();
                           const page = pageData.query.pages[item.pageid];
                           toolResult = page.extract.substring(0, 3000);
                         } else {
@@ -384,7 +394,7 @@ export function createSubAgentTools(ctx: ToolContext): Tool[] {
                         if (!args.url.startsWith("http://") && !args.url.startsWith("https://")) {
                           toolResult = "Error: URL must start with http:// or https://";
                         } else {
-                          const res = await fetch(args.url, { signal: AbortSignal.timeout(WEB_FETCH_TIMEOUT_MS) });
+                          const res = await fetch(args.url, { signal: AbortSignal.timeout(Math.min(WEB_FETCH_TIMEOUT_MS, deadlineMs - Date.now())) });
                           const plainText = htmlToPlainText(await res.text());
                           toolResult = plainText.length > 8000
                             ? `${plainText.substring(0, 8000)}\n... (truncated)`
@@ -450,7 +460,7 @@ export function createSubAgentTools(ctx: ToolContext): Tool[] {
                       } else if (!ctx.client) {
                         toolResult = "Error: LM Studio client unavailable for RAG.";
                       } else {
-                        const res = await fetch(args.url, { signal: AbortSignal.timeout(WEB_FETCH_TIMEOUT_MS) });
+                        const res = await fetch(args.url, { signal: AbortSignal.timeout(Math.min(WEB_FETCH_TIMEOUT_MS, deadlineMs - Date.now())) });
                         const plainText = htmlToPlainText(await res.text());
                         const { performRagOnText } = await import("./helpers");
                         const topChunks = await performRagOnText(plainText, args.query, ctx.client, ctx.embeddingModelName);
@@ -620,7 +630,9 @@ export function createSubAgentTools(ctx: ToolContext): Tool[] {
         };
 
         // ── Primary agent loop ───────────────────────────────────────────────
-        const primaryResult = await runAgentLoop(agent_role, task, context, 8, false, ctx.cwd);
+        // Shared deadline: primary + debug reviewer run together within the time limit.
+        const sharedDeadlineMs = Date.now() + subAgentTimeLimitSec * 1000;
+        const primaryResult = await runAgentLoop(agent_role, task, context, 8, false, ctx.cwd, sharedDeadlineMs);
         if (primaryResult.error) return { error: primaryResult.error };
 
         let finalResponse = primaryResult.response || "";
@@ -637,7 +649,7 @@ export function createSubAgentTools(ctx: ToolContext): Tool[] {
           const debugResult = await runAgentLoop(
             "reviewer",
             `Review the code in these files: ${filesToCheck}. Check for bugs, syntax errors, or logic flaws. If you find any, use 'save_file' to FIX them. If they are correct, confirm it.`,
-            debugContext, 5, true, ctx.cwd,
+            debugContext, 5, true, ctx.cwd, sharedDeadlineMs,
           );
 
           finalResponse += "\n\n--- Auto-Debug Report ---\n" + (debugResult.response || "Debug pass completed.");

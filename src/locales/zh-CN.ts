@@ -79,11 +79,6 @@ export const zhCN: LocaleDict = {
       subtitle:
         "要禁止所有操作的盘符或路径列表（例如 D:\\、C:\\Windows）。每行一个。⚠️ Shell 命令无法通过路径匹配完全拦截——此功能作为防护屏障使用，而非安全边界。",
     },
-    searchApiKey: {
-      displayName: "搜索 API 密钥",
-      subtitle:
-        "搜索服务的可选 API 密钥（如支持），可避免速率限制。",
-    },
     embeddingModel: {
       displayName: "嵌入模型",
       subtitle:

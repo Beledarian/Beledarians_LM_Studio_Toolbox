@@ -94,10 +94,6 @@ export const pluginConfigSchematics = createConfigSchematics()
   }, "")
 
   // ── Search / Embedding ─────────────────────────────────────────────────────
-  .field("searchApiKey", "string", {
-    displayName: c.searchApiKey.displayName,
-    subtitle: c.searchApiKey.subtitle,
-  }, "")
   .field("embeddingModel", "string", {
     displayName: c.embeddingModel.displayName,
     subtitle: c.embeddingModel.subtitle,

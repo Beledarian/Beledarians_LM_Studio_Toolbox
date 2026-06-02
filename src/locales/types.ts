@@ -26,7 +26,6 @@ export interface LocaleDict {
     allowAllCode: { displayName: string; subtitle: string };
     protectedPaths: { displayName: string; subtitle: string };
 
-    searchApiKey: { displayName: string; subtitle: string };
     embeddingModel: { displayName: string; subtitle: string };
     defaultWorkspacePath: { displayName: string; subtitle: string };
 

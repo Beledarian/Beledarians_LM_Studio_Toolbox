@@ -66,10 +66,6 @@ export const zhTW: LocaleDict = {
       displayName: "受保護路徑",
       subtitle: "要禁止所有操作的磁碟機或路徑列表（例如 D:\\、C:\\Windows）。每行一個。⚠️ Shell 指令無法透過路徑比對完全攔截——請將此功能視為防護措施，而非安全邊界。",
     },
-    searchApiKey: {
-      displayName: "搜尋 API 金鑰",
-      subtitle: "搜尋服務的選用 API 金鑰，可避免速率限制。",
-    },
     embeddingModel: {
       displayName: "嵌入模型",
       subtitle: "用於 RAG 功能的模型（預設：nomic-ai/nomic-embed-text-v1.5-GGUF）。中文內容推薦使用 BAAI/bge-m3-gguf。",
