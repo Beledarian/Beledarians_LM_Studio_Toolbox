@@ -8,7 +8,8 @@
     "push": "lms push",
     "typecheck": "tsc --noEmit",
     "build": "tsc",
-    "test": "node --test tests/browserActions.test.js tests/fuzzySearch.test.js tests/handoffMessage.test.js tests/subAgentToolCallParser.test.js tests/promptPreprocessor.test.js tests/nodeNotifier.test.js tests/fileEditingTools.test.js tests/subAgentValidation.test.js tests/i18n.test.js tests/memoryTools.test.js tests/security.test.js",
+    "test": "node --test tests/browserActions.test.js tests/fuzzySearch.test.js tests/handoffMessage.test.js tests/subAgentToolCallParser.test.js tests/promptPreprocessor.test.js tests/nodeNotifier.test.js tests/fileEditingTools.test.js tests/subAgentValidation.test.js tests/i18n.test.js tests/memoryTools.test.js tests/security.test.js tests/fileTools.test.js tests/pythonSandbox.test.js",
+    "coverage": "node_modules/.bin/c8 --reporter=text --reporter=html node --test tests/browserActions.test.js tests/fuzzySearch.test.js tests/handoffMessage.test.js tests/subAgentToolCallParser.test.js tests/promptPreprocessor.test.js tests/nodeNotifier.test.js tests/fileEditingTools.test.js tests/subAgentValidation.test.js tests/i18n.test.js tests/memoryTools.test.js tests/security.test.js tests/fileTools.test.js tests/pythonSandbox.test.js",
     "ci": "npm run typecheck && npm run build && npm run test"
   },
   "author": "",
@@ -32,6 +33,7 @@
     "@types/node": "^20.14.8",
     "@types/node-notifier": "^8.0.5",
     "@types/pdf-parse": "^1.1.5",
+    "c8": "^10.1.3",
     "ts-morph": "^27.0.2",
     "typescript": "^5.9.3"
   }
