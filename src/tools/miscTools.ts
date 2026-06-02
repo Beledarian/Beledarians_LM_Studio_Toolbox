@@ -243,7 +243,7 @@ export function createMiscTools(ctx: ToolContext): Tool[] {
             : textFiles;
 
           const filesToScan = filteredFiles.slice(0, 50);
-          let allChunks: { chunk: string; score: number; file: string }[] = [];
+          const allChunks: { chunk: string; score: number; file: string }[] = [];
 
           const embeddingModel = await ctx.client.embedding.model(ctx.embeddingModelName);
           const [queryEmbedding] = await embeddingModel.embed([query]);

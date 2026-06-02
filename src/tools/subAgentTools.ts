@@ -166,7 +166,7 @@ export function createSubAgentTools(ctx: ToolContext): Tool[] {
               const message = data?.choices?.[0]?.message;
               const parsedMessage = parseSubAgentResponseMessage(message);
               const content = parsedMessage.content;
-              let toolCall: ParsedToolCall | null = parsedMessage.toolCall;
+              const toolCall: ParsedToolCall | null = parsedMessage.toolCall;
 
               if (subAgentDebugLogging) {
                 const rawContent = (typeof message === "string" ? message : JSON.stringify(message)) ?? "";

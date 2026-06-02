@@ -43,7 +43,7 @@ export async function getPersistedState(configuredWorkspacePath?: string): Promi
       subAgentDocsInjected: state.subAgentDocsInjected ?? false,
       uiLanguageOverride: state.uiLanguageOverride ?? "auto",
     };
-  } catch (error) {
+  } catch {
     return {
       currentWorkingDirectory: configuredDirectory,
       messageCount: 0,

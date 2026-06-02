@@ -145,7 +145,7 @@ export async function promptPreprocessor(ctl: PromptPreprocessorController, user
           docsInjected = true;
           break;
         }
-      } catch (e) {
+      } catch {
         // Keep trying fallback paths.
       }
     }
@@ -176,7 +176,7 @@ export async function promptPreprocessor(ctl: PromptPreprocessorController, user
           usedStartupPath = dirname(startupPath);
           ctl.debug(`startup.md loaded from: ${startupPath}`);
           break;
-        } catch (e) {
+        } catch {
           // Keep trying
         }
       }
@@ -201,7 +201,7 @@ export async function promptPreprocessor(ctl: PromptPreprocessorController, user
                 loaded = true;
                 break;
               }
-            } catch (e) {
+            } catch {
               // Keep trying
             }
           }
@@ -210,7 +210,7 @@ export async function promptPreprocessor(ctl: PromptPreprocessorController, user
           }
         }
       }
-    } catch (e) {
+    } catch {
       ctl.debug("No startup.md file found or failed to load.");
     }
 

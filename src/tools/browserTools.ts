@@ -1,4 +1,4 @@
-import { tool, text, type Tool } from "@lmstudio/sdk";
+import { tool, type Tool } from "@lmstudio/sdk";
 import { z } from "zod";
 import type { ToolContext } from "./context";
 import { validatePath, createSafeToolImplementation } from "./helpers";

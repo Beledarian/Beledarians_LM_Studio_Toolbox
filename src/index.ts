@@ -1,4 +1,4 @@
-import { type PluginContext, LMStudioClient } from "@lmstudio/sdk";
+import { type PluginContext } from "@lmstudio/sdk";
 import { toolsProvider } from "./toolsProvider";
 import { promptPreprocessor } from "./promptPreprocessor";
 import { pluginConfigSchematics } from "./config";

@@ -245,7 +245,7 @@ export function createFileTools(ctx: ToolContext): Tool[] {
       try {
         const filePath = validatePath(ctx.cwd, file_name, ctx.protectedPaths);
         const content = await readFile(filePath, "utf-8");
-        let lines = content.split("\n");
+        const lines = content.split("\n");
         const errors: string[] = [];
 
         const sortedReplacements = [...replacements].sort((a, b) => b.start_line - a.start_line);
