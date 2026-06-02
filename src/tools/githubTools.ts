@@ -230,24 +230,9 @@ export function createGithubTools(ctx: ToolContext): Tool[] {
     },
   }));
 
-  tools.push(tool({
-    name: "gh_push",
-    description: "Push local commits to the remote GitHub repository.",
-    parameters: {
-      branch: z.string().optional().describe("Optional: The branch to push. Defaults to current branch."),
-    },
-    implementation: async ({ branch }) => {
-      const check = await checkGhInstalled();
-      if (typeof check === "string") return { error: check };
-
-      const gitArgs = ["push", "origin"];
-      if (branch) gitArgs.push(branch);
-
-      const { stderr, exitCode } = await spawnCollect("git", gitArgs, ctx.cwd);
-      if (exitCode === 0) return { success: true, message: "Pushed successfully." };
-      return { error: `Git push failed: ${stderr}` };
-    },
-  }));
+  // gh_push was removed — use git_push (gitTools.ts) instead, which provides
+  // the same functionality with better options (set_upstream, force flag,
+  // explicit remote/branch) and consistent error handling via simple-git.
 
   return tools;
 }
