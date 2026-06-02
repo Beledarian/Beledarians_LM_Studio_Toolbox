@@ -214,6 +214,36 @@ export async function promptPreprocessor(ctl: PromptPreprocessorController, user
       ctl.debug("No startup.md file found or failed to load.");
     }
 
+    // --- Memory Injection (First Turn Only) ---
+    // If the memory feature is enabled and the DB has entries, prepend a compact
+    // summary so the LLM knows what it has remembered from previous sessions.
+    const enableMemory = pluginConfig.get("enableMemory");
+    if (enableMemory) {
+      try {
+        const dbPath = join(state.currentWorkingDirectory, ".memories.db");
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const Database: new (path: string, opts?: object) => any = require("better-sqlite3");
+        const db = new Database(dbPath, { readonly: true });
+        const rows: Array<{ id: number; fact: string; tags: string }> =
+          db.prepare("SELECT id, fact, tags FROM memories ORDER BY created_at DESC LIMIT 50").all();
+        db.close();
+        if (rows.length > 0) {
+          const lines = rows.map(r =>
+            `- [id:${r.id}]${r.tags ? ` [${r.tags}]` : ""} ${r.fact}`
+          ).join("\n");
+          const memoryBlock =
+            `## Memories from Previous Sessions\n` +
+            `You have ${rows.length} stored memory entries. ` +
+            `Use \`list_memories\`, \`search_memories\`, \`update_memory\`, and \`delete_memory\` to manage them.\n\n` +
+            lines;
+          injectionContent = `${memoryBlock}\n\n---\n\n${injectionContent}`;
+          ctl.debug(`[memory] Injected ${rows.length} memories into first-turn context.`);
+        }
+      } catch {
+        // DB doesn't exist yet or native binding unavailable — skip silently.
+      }
+    }
+
     currentContent = `${injectionContent}\n\n---\n\n${currentContent}`;
   }
 

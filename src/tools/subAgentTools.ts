@@ -102,7 +102,12 @@ export function createSubAgentTools(ctx: ToolContext): Tool[] {
           const toolsEnabled = allow_tools || forceTools;
           if (toolsEnabled) {
             const allowedTools: string[] = [];
-            if (allowFileSystem) allowedTools.push("read_file", "list_directory", "save_file", "replace_text_in_file", "delete_files_by_pattern", "rag_local_files", "fuzzy_find_local_files");
+            if (allowFileSystem) allowedTools.push(
+              "read_file", "read_file_range", "list_directory",
+              "search_in_file", "find_files",
+              "save_file", "append_file", "replace_text_in_file",
+              "delete_files_by_pattern", "rag_local_files", "fuzzy_find_local_files",
+            );
             if (allowWeb) allowedTools.push("wikipedia_search", "web_search", "fetch_web_content", "rag_web_content");
             if (allowWeb && allowSubAgentBrowserControl && ctx.allowBrowserControl) allowedTools.push("browser_session_open", "browser_session_control", "browser_session_close");
             if (allowCode) allowedTools.push("run_python", "run_javascript");
@@ -202,6 +207,52 @@ export function createSubAgentTools(ctx: ToolContext): Tool[] {
                         toolResult = readContent.length > MAX_SUB_AGENT_OUTPUT_CHARS
                           ? `${readContent.substring(0, MAX_SUB_AGENT_OUTPUT_CHARS)}\n... (truncated)`
                           : readContent;
+                      } else if (toolCall.tool === "read_file_range" && args.file_name) {
+                        const fpath = validatePath(cwd, args.file_name);
+                        const lines = (await readFile(fpath, "utf-8")).split("\n");
+                        const start = Math.max(1, Number(args.start_line ?? 1));
+                        const end = Math.min(Number(args.end_line ?? lines.length), lines.length);
+                        const selected = lines.slice(start - 1, end);
+                        toolResult = selected.map((l, i) => `${start + i}: ${l}`).join("\n");
+                      } else if (toolCall.tool === "search_in_file" && args.file_name && args.pattern) {
+                        const fpath = validatePath(cwd, args.file_name);
+                        const fileLines = (await readFile(fpath, "utf-8")).split("\n");
+                        const caseSensitive = args.case_sensitive !== false;
+                        const useRegex = args.use_regex === true;
+                        const regex = useRegex
+                          ? new RegExp(args.pattern, caseSensitive ? "" : "i")
+                          : null;
+                        const hits: string[] = [];
+                        for (let i = 0; i < fileLines.length; i++) {
+                          const line = fileLines[i];
+                          const match = regex
+                            ? regex.test(line)
+                            : caseSensitive ? line.includes(args.pattern) : line.toLowerCase().includes(args.pattern.toLowerCase());
+                          if (match) hits.push(`${i + 1}: ${line}`);
+                          if (hits.length >= 100) break;
+                        }
+                        toolResult = hits.length > 0 ? hits.join("\n") : "No matches found.";
+                      } else if (toolCall.tool === "find_files" && args.pattern) {
+                        const lowerPat = String(args.pattern).toLowerCase();
+                        const depthLimit = Math.min(Number(args.max_depth ?? 5), 8);
+                        const found: string[] = [];
+                        async function scanDir(dir: string, depth: number) {
+                          if (depth > depthLimit || found.length >= 100) return;
+                          for (const entry of await readdir(dir, { withFileTypes: true })) {
+                            if (["node_modules", ".git", "dist", ".lmstudio"].includes(entry.name)) continue;
+                            const full = join(dir, entry.name);
+                            if (entry.isDirectory()) await scanDir(full, depth + 1);
+                            else if (entry.isFile() && entry.name.toLowerCase().includes(lowerPat)) found.push(relative(cwd, full));
+                          }
+                        }
+                        await scanDir(cwd, 0);
+                        toolResult = JSON.stringify(found);
+                      } else if (toolCall.tool === "append_file" && args.file_name && args.content !== undefined) {
+                        const fpath = validatePath(cwd, args.file_name);
+                        await mkdir(dirname(fpath), { recursive: true });
+                        await appendFile(fpath, args.content, "utf-8");
+                        filesModified.push(args.file_name);
+                        toolResult = `Success: Content appended to ${args.file_name}`;
                       } else if (toolCall.tool === "list_directory") {
                         const listPath = args?.path ? validatePath(cwd, args.path) : cwd;
                         toolResult = JSON.stringify(await readdir(listPath));
