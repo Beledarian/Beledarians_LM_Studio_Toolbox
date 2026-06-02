@@ -74,10 +74,6 @@ export const en: LocaleDict = {
       subtitle: "List of drives or paths to block all file/shell operations on (e.g. D:\\, C:\\Windows). One per line. Shell commands cannot be fully blocked by path matching — use this as a safeguard, not a security boundary.",
     },
 
-    searchApiKey: {
-      displayName: "Search API Key",
-      subtitle: "Optional API key for search services (if supported) to avoid rate limits.",
-    },
     embeddingModel: {
       displayName: "Embedding Model",
       subtitle: "Model to use for RAG features (default: nomic-ai/nomic-embed-text-v1.5-GGUF)",

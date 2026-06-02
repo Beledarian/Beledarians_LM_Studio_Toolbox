@@ -66,10 +66,6 @@ export const de: LocaleDict = {
       displayName: "Geschützte Pfade",
       subtitle: "Liste der Laufwerke oder Pfade, für die alle Vorgänge blockiert werden sollen (z. B. D:\\, C:\\Windows). Eine pro Zeile. Shell-Befehle können durch Pfadabgleich nicht vollständig blockiert werden – als Schutzmaßnahme verwenden, nicht als Sicherheitsgrenze.",
     },
-    searchApiKey: {
-      displayName: "Such-API-Schlüssel",
-      subtitle: "Optionaler API-Schlüssel für Suchdienste zur Vermeidung von Rate-Limits.",
-    },
     embeddingModel: {
       displayName: "Einbettungsmodell",
       subtitle: "Modell für RAG-Funktionen (Standard: nomic-ai/nomic-embed-text-v1.5-GGUF).",
