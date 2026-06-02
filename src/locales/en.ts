@@ -91,7 +91,7 @@ export const en: LocaleDict = {
     enableMemory: {
       displayName: "Enable Memory",
       subtitle:
-        "If enabled, the model can save and recall information from a 'memory.md' file in the workspace.",
+        "If enabled, the model can save and recall facts using a persistent SQLite memory database (save_memory, list_memories, search_memories, update_memory, delete_memory).",
     },
     enableWikipediaTool: {
       displayName: "Enable Wikipedia Tool",

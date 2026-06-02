@@ -80,7 +80,7 @@ export const de: LocaleDict = {
     },
     enableMemory: {
       displayName: "Gedächtnis aktivieren",
-      subtitle: "Wenn aktiviert, kann das Modell Informationen aus einer 'memory.md'-Datei im Arbeitsbereich speichern und abrufen.",
+      subtitle: "Wenn aktiviert, kann das Modell Fakten in einer persistenten SQLite-Datenbank speichern und abrufen (save_memory, list_memories, search_memories, update_memory, delete_memory).",
     },
     enableWikipediaTool: {
       displayName: "Wikipedia-Tool aktivieren",
