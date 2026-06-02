@@ -247,6 +247,42 @@ export function createSubAgentTools(ctx: ToolContext): Tool[] {
                           .filter(e => e.isFile())
                           .map(e => relative(targetDir, join((e as any).parentPath ?? (e as any).path, e.name)).replace(/\\/g, "/"));
                         toolResult = JSON.stringify(rankFuzzyMatches(args.query, files, maxResults).map(item => ({ path: item.value, score: item.score })));
+                      } else if (toolCall.tool === "rag_local_files" && args.query) {
+                        if (!ctx.client) {
+                          toolResult = "Error: LM Studio client unavailable for RAG.";
+                        } else {
+                          const targetDir = validatePath(cwd, args.path || ".");
+                          const filePattern: string = args.file_pattern || "";
+                          const entries = await readdir(targetDir, { recursive: true, withFileTypes: true });
+                          const textFiles = entries.filter(e =>
+                            e.isFile() && !e.name.match(/\.(png|jpg|jpeg|gif|ico|exe|dll|bin)$/i) &&
+                            (!filePattern || e.name.includes(filePattern) || join((e as any).parentPath ?? (e as any).path, e.name).includes(filePattern))
+                          ).slice(0, 50);
+
+                          const { cosineSimilarity } = await import("./helpers");
+                          const embeddingModel = await ctx.client.embedding.model(ctx.embeddingModelName);
+                          const [queryEmbedding] = await embeddingModel.embed([args.query]);
+                          const allChunks: { chunk: string; score: number; file: string }[] = [];
+
+                          for (const file of textFiles) {
+                            try {
+                              const fullPath = join((file as any).parentPath ?? (file as any).path, file.name);
+                              const content = await readFile(fullPath, "utf-8");
+                              const chunks = content.split(/\n\s*\n/).filter(c => c.trim().length > 20);
+                              if (!chunks.length) continue;
+                              const chunkEmbeddings = await embeddingModel.embed(chunks);
+                              chunks.forEach((chunk, i) => {
+                                const score = cosineSimilarity(queryEmbedding.embedding, chunkEmbeddings[i].embedding);
+                                if (score > 0.4) allChunks.push({ chunk, score, file: file.name });
+                              });
+                            } catch { /* skip unreadable files */ }
+                          }
+
+                          allChunks.sort((a, b) => b.score - a.score);
+                          toolResult = JSON.stringify(allChunks.slice(0, 10).map(c => ({
+                            file: c.file, score: c.score.toFixed(3), content: c.chunk,
+                          })));
+                        }
                       }
                     }
 

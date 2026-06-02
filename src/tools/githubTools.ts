@@ -42,16 +42,32 @@ export function createGithubTools(ctx: ToolContext): Tool[] {
       const check = await checkGhInstalled();
       if (typeof check === "string") return { error: check };
 
-      const { stdout, exitCode } = await spawnCollect("gh", ["auth", "status"], ctx.cwd);
+      const { exitCode } = await spawnCollect("gh", ["auth", "status"], ctx.cwd);
       if (exitCode === 0) return { success: true, message: "Already authenticated with GitHub." };
 
+      // Open an interactive terminal for `gh auth login` on every platform.
+      const authCmd = "gh auth login --git-protocol=https";
       if (process.platform === "win32") {
         const escapedDir = ctx.cwd.replace(/"/g, '""');
-        const shellCommand = `start "" /D "${escapedDir}" cmd.exe /k "gh auth login --git-protocol=https & exit"`;
-        spawn("cmd.exe", ["/c", shellCommand], { detached: true, stdio: "ignore" });
-        return { success: true, message: "Opened a terminal window for GitHub authentication. Please sign in there." };
+        const shellCommand = `start "" /D "${escapedDir}" cmd.exe /k "${authCmd.replace(/"/g, '""')}"`;
+        spawn("cmd.exe", ["/c", shellCommand], { detached: true, stdio: "ignore", windowsVerbatimArguments: true }).unref();
+      } else if (process.platform === "darwin") {
+        const safeCwd = ctx.cwd.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+        const safeCmd = authCmd.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+        const appleScript = `tell application "Terminal"\n  do script "cd \\"${safeCwd}\\" && ${safeCmd}"\n  activate\nend tell`;
+        spawn("osascript", ["-e", appleScript], { detached: true, stdio: "ignore" }).unref();
+      } else {
+        // Linux: try x-terminal-emulator, fall back to gnome-terminal
+        const safeCwd = ctx.cwd.replace(/'/g, "'\\''");
+        const safeCmd = authCmd.replace(/'/g, "'\\''");
+        const bashScript = `cd '${safeCwd}' && ${safeCmd}`;
+        const child = spawn("x-terminal-emulator", ["-e", "bash", "-c", bashScript], { detached: true, stdio: "ignore" });
+        child.on("error", () => {
+          spawn("gnome-terminal", ["--", "bash", "-c", bashScript], { detached: true, stdio: "ignore" }).unref();
+        });
+        child.unref();
       }
-      return { error: "Not authenticated. Please run 'gh auth login' in your terminal." };
+      return { success: true, message: "Opened a terminal window for GitHub authentication. Please sign in there." };
     },
   }));
 

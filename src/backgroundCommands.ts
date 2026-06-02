@@ -16,6 +16,18 @@ export interface BackgroundCommand {
 
 export const backgroundCommands = new Map<string, BackgroundCommand>();
 
+const COMPLETED_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
+/** Remove finished commands that are older than COMPLETED_TTL_MS. Call before any read or write. */
+export function pruneBackgroundCommands(): void {
+  const now = Date.now();
+  for (const [id, cmd] of backgroundCommands) {
+    if (cmd.status !== "running" && now - cmd.startTime > COMPLETED_TTL_MS) {
+      backgroundCommands.delete(id);
+    }
+  }
+}
+
 export function getRunningCommandsStatus(): string {
   const running = Array.from(backgroundCommands.values()).filter(c => c.status === "running");
   if (running.length === 0) return "";

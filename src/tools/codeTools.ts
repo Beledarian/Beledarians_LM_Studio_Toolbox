@@ -6,7 +6,7 @@ import { join } from "path";
 import * as os from "os";
 import type { ToolContext } from "./context";
 import { createSafeToolImplementation, getDenoPath } from "./helpers";
-import { backgroundCommands, generateId, type BackgroundCommand } from "../backgroundCommands";
+import { backgroundCommands, generateId, pruneBackgroundCommands, type BackgroundCommand } from "../backgroundCommands";
 
 // ─── JavaScript (Deno sandbox) ────────────────────────────────────────────────
 
@@ -226,6 +226,7 @@ export function createCodeTools(ctx: ToolContext): Tool[] {
       try {
         if (!timeout_hours) return { error: "timeout_hours is MANDATORY" };
         if (!name) return { error: "name is MANDATORY" };
+        pruneBackgroundCommands();
 
         const timeoutMs = timeout_hours * 60 * 60 * 1000;
         const id = generateId();
@@ -284,6 +285,7 @@ export function createCodeTools(ctx: ToolContext): Tool[] {
     description: "Check the status, stdout, and stderr of a running or completed background command.",
     parameters: { id: z.string() },
     implementation: async ({ id }) => {
+      pruneBackgroundCommands();
       const bgCmd = backgroundCommands.get(id);
       if (!bgCmd) return { error: `No background command found with ID ${id}` };
       return {
@@ -301,6 +303,7 @@ export function createCodeTools(ctx: ToolContext): Tool[] {
     description: "Kills a running background command.",
     parameters: { id: z.string() },
     implementation: async ({ id }) => {
+      pruneBackgroundCommands();
       const bgCmd = backgroundCommands.get(id);
       if (!bgCmd) return { error: `No background command found with ID ${id}` };
       if (bgCmd.status !== "running") return { message: `Command is already ${bgCmd.status}` };
