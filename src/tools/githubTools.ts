@@ -5,10 +5,13 @@ import { writeFile, rm } from "fs/promises";
 import { join } from "path";
 import type { ToolContext } from "./context";
 
+/** Default timeout for gh/git CLI spawns (30 seconds). */
+const SPAWN_TIMEOUT_MS = 30_000;
+
 async function checkGhInstalled(): Promise<true | string> {
   try {
     const cmd = process.platform === "win32" ? "where gh" : "which gh";
-    const child = spawn(cmd, [], { shell: true });
+    const child = spawn(cmd, [], { shell: true, timeout: 5_000 });
     const code = await new Promise<number | null>(resolve => child.on("close", resolve));
     if (code === 0) return true;
     return "GitHub CLI ('gh') is not installed. Please ask the user to install it from https://cli.github.com/";
@@ -17,9 +20,14 @@ async function checkGhInstalled(): Promise<true | string> {
   }
 }
 
-function spawnCollect(cmd: string, args: string[], cwd: string): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
+function spawnCollect(
+  cmd: string,
+  args: string[],
+  cwd: string,
+  timeoutMs = SPAWN_TIMEOUT_MS,
+): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
   return new Promise(resolve => {
-    const child = spawn(cmd, args, { cwd });
+    const child = spawn(cmd, args, { cwd, timeout: timeoutMs });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", d => stdout += d);

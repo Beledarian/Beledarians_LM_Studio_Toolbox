@@ -200,6 +200,13 @@ export function createSubAgentTools(ctx: ToolContext): Tool[] {
 
               // ── Tool call handling ─────────────────────────────────────────
               if (toolCall?.tool) {
+                // finish_task is the model's explicit termination signal — treat it
+                // like TASK_COMPLETED rather than falling through to "Tool not found".
+                if (toolCall.tool === "finish_task") {
+                  if (content.trim()) finalContent = content;
+                  break;
+                }
+
                 noToolCallCount = 0;
                 executedToolCallCount++;
                 msgList.push({ role: "assistant", content });
