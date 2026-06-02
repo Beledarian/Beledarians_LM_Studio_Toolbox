@@ -25,14 +25,19 @@ function resolveWorkspaceDirectory(configuredWorkspacePath?: string): string {
 
 export async function getPersistedState(configuredWorkspacePath?: string): Promise<PluginState> {
   const configuredDirectory = resolveWorkspaceDirectory(configuredWorkspacePath);
+  // If the user has explicitly set a workspace path in the plugin config, it
+  // always wins over whatever was last persisted.  The persisted CWD is only
+  // used as "remember where I left off" when no workspace is configured.
+  const hasExplicitConfig = Boolean(configuredWorkspacePath?.trim());
 
   try {
     const statePath = join(os.homedir(), ".beledarians-llm-toolbox", CONFIG_FILE_NAME);
     const content = await readFile(statePath, "utf-8");
     const state = JSON.parse(content);
     return {
-      // configuredDirectory is a startup default/fallback, not a forced override
-      currentWorkingDirectory: state.currentWorkingDirectory ?? configuredDirectory,
+      currentWorkingDirectory: hasExplicitConfig
+        ? configuredDirectory
+        : (state.currentWorkingDirectory ?? configuredDirectory),
       messageCount: state.messageCount ?? 0,
       dontAskToCompress: state.dontAskToCompress ?? false,
       subAgentDocsInjected: state.subAgentDocsInjected ?? false,
