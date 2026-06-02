@@ -232,20 +232,16 @@ export async function ragLocalFiles(opts: {
   type FileMeta = { fullPath: string; name: string };
   const hits: FileMeta[] = [];
   const misses: FileMeta[] = [];
-  const mtimes: number[] = [];
 
   await Promise.all(candidates.map(async e => {
     const fullPath = join((e as any).parentPath ?? (e as any).path, e.name);
     try {
-      const s = await stat(fullPath);
-      const mtime = s.mtimeMs;
+      const mtime = (await stat(fullPath)).mtimeMs;
       const cached = _embeddingCache.get(fullPath);
       if (cached && cached.mtime === mtime) {
         hits.push({ fullPath, name: e.name });
-        mtimes.push(mtime);
       } else {
         misses.push({ fullPath, name: e.name });
-        mtimes.push(mtime);
       }
     } catch {
       // unreadable / deleted — skip
