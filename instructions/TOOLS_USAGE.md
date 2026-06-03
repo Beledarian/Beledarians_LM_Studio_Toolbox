@@ -56,7 +56,11 @@
 - **preview_html**: Render HTML in default browser.
 
 ### Agent & Memory
-- **save_memory**: Save facts to `memory.md`.
+- **save_memory**: Persist a fact to the SQLite memory store.
+- **list_memories**: List stored memories, newest-first; optionally filter by tag.
+- **search_memories**: Full-text keyword search over stored facts and tags.
+- **update_memory**: Edit the text or tags of an existing memory by ID.
+- **delete_memory**: Remove a memory by ID.
 - **consult_secondary_agent**: Delegate tasks (summarization, coding) to a secondary model/server.
     - **Auto-Save**: Automatically detects and saves code blocks to files.
     - **Auto-Debug**: Can automatically review and fix code if enabled.

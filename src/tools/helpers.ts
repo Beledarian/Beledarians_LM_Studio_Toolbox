@@ -43,11 +43,151 @@ export function parseProtectedPaths(raw: string): string[] {
 
 // ─── SSRF-safe fetch ─────────────────────────────────────────────────────────
 
+const MAX_REDIRECT_HOPS = 5;
+
+/**
+ * Returns true if the given IP string (IPv4 dotted-quad or bare IPv6) refers
+ * to a loopback, private, link-local, or otherwise special-purpose address
+ * that must not be reached from the server side.
+ *
+ * Exported so it can be unit-tested independently.
+ */
+export function isBlockedIp(ip: string): boolean {
+  const n = ip.toLowerCase();
+
+  // IPv4-mapped IPv6 (e.g. ::ffff:127.0.0.1) — extract and recurse
+  const mapped = n.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
+  if (mapped) return isBlockedIp(mapped[1]);
+
+  // ── IPv6 special ranges ──────────────────────────────────────────────────
+  if (n === "::1") return true;                         // loopback
+  if (n.startsWith("fe80")) return true;                // link-local fe80::/10
+  if (n.startsWith("fc") || n.startsWith("fd")) return true; // ULA fc00::/7 (full range)
+
+  // ── IPv4 dotted-quad ─────────────────────────────────────────────────────
+  const quad = n.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (quad) {
+    const [a, b, c] = [Number(quad[1]), Number(quad[2]), Number(quad[3])];
+    return (
+      a === 0 ||                                        // 0.x.x.x — "this" network
+      a === 10 ||                                       // 10/8 — RFC-1918
+      a === 127 ||                                      // 127/8 — loopback
+      (a === 100 && b >= 64 && b <= 127) ||            // 100.64–127/10 — CGNAT RFC-6598
+      (a === 169 && b === 254) ||                       // 169.254/16 — link-local / cloud metadata
+      (a === 172 && b >= 16 && b <= 31) ||             // 172.16–31/12 — RFC-1918
+      (a === 192 && b === 0 && c === 2) ||             // 192.0.2/24 — TEST-NET-1
+      (a === 192 && b === 168) ||                       // 192.168/16 — RFC-1918
+      (a === 198 && b >= 18 && b <= 19) ||             // 198.18–19/15 — benchmarking (was: a===198 over-block)
+      (a === 198 && b === 51 && c === 100) ||          // 198.51.100/24 — TEST-NET-2
+      (a === 203 && b === 0 && c === 113) ||           // 203.0.113/24 — TEST-NET-3
+      a >= 224                                          // 224+ — multicast / reserved
+    );
+  }
+
+  return false;
+}
+
+/**
+ * Parse and validate a URL for SSRF safety.  Checks scheme, parses the URL,
+ * and rejects any hostname that is localhost, 0.0.0.0, or maps to a blocked IP.
+ *
+ * Returns the parsed URL on success; throws on any violation.
+ * Exported so it can be unit-tested independently.
+ */
+export function validateSsrfUrl(url: string): URL {
+  if (!url.startsWith("http://") && !url.startsWith("https://")) {
+    throw new Error(`SSRF protection: only http:// and https:// URLs are allowed (got: ${url.slice(0, 80)}).`);
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`Invalid URL: ${url.slice(0, 80)}`);
+  }
+  // Strip surrounding brackets from IPv6 (e.g. [::1] → ::1)
+  const hostname = parsed.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  if (hostname === "localhost" || hostname === "0.0.0.0") {
+    throw new Error(`SSRF protection: access to '${hostname}' is not allowed.`);
+  }
+  if (isBlockedIp(hostname)) {
+    throw new Error(`SSRF protection: access to '${hostname}' is not allowed.`);
+  }
+  return parsed;
+}
+
+/**
+ * Best-effort DNS pre-check: resolve the hostname and verify no returned
+ * address falls in a blocked range.  This catches misconfigured or malicious
+ * internal DNS records.
+ *
+ * Note: there is an unavoidable TOCTOU window between this check and the
+ * actual fetch — DNS rebinding attacks can still succeed.  This is documented
+ * in SECURITY.md as a residual risk.
+ *
+ * Skipped for bare IP addresses (no lookup needed) and DNS resolution errors
+ * (NXDOMAIN, timeout) so a flaky resolver doesn't break legitimate requests.
+ */
+async function checkDnsForSsrf(hostname: string): Promise<void> {
+  // Skip if hostname is already a dotted-quad IPv4 or contains a colon (IPv6)
+  if (/^[\d.]+$/.test(hostname) || hostname.includes(":")) return;
+  const dns = await import("dns");
+  try {
+    const addresses = await dns.promises.lookup(hostname, { all: true });
+    for (const { address } of addresses) {
+      if (isBlockedIp(address.toLowerCase())) {
+        throw new Error(
+          `SSRF protection: hostname '${hostname}' resolves to blocked address '${address}'.`
+        );
+      }
+    }
+  } catch (e) {
+    // Re-throw only our own SSRF errors; swallow all DNS failures
+    if (e instanceof Error && e.message.startsWith("SSRF protection:")) throw e;
+    // DNS failure (NXDOMAIN, timeout, etc.) — let fetch proceed; residual risk documented
+  }
+}
+
+/**
+ * Internal recursive helper that performs a single fetch hop with
+ * redirect: "manual", then re-validates any redirect Location before
+ * following it.  This closes the redirect-bypass SSRF vector (SEC-R1).
+ */
+async function safeFetchHop(
+  url: string,
+  options: RequestInit & { timeoutMs?: number },
+  hopCount: number,
+): Promise<Response> {
+  const parsed = validateSsrfUrl(url);
+  await checkDnsForSsrf(parsed.hostname);
+
+  const { timeoutMs = 30_000, signal: callerSignal, ...fetchOptions } = options;
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  const signal = callerSignal
+    ? AbortSignal.any([callerSignal, timeoutSignal])
+    : timeoutSignal;
+
+  const response = await fetch(url, { ...fetchOptions, signal, redirect: "manual" });
+
+  if (response.status >= 300 && response.status < 400) {
+    if (hopCount >= MAX_REDIRECT_HOPS) {
+      throw new Error(`SSRF protection: too many redirects (max ${MAX_REDIRECT_HOPS}).`);
+    }
+    const location = response.headers.get("location");
+    if (!location) throw new Error("Redirect response missing Location header.");
+    const redirectUrl = new URL(location, url).toString();
+    return safeFetchHop(redirectUrl, options, hopCount + 1);
+  }
+
+  return response;
+}
+
 /**
  * A drop-in replacement for `fetch()` that:
  *  - Enforces http/https scheme only
  *  - Blocks requests to loopback, private RFC-1918, link-local (cloud
  *    metadata), and other special-purpose address ranges (SSRF protection)
+ *  - Re-validates every redirect hop to prevent open-redirect bypass attacks
+ *  - Performs a best-effort DNS pre-check for internal hostnames
  *  - Applies a configurable timeout via AbortSignal (default 30 s)
  *
  * Throws on SSRF violations so callers can return a clean { error } message.
@@ -56,65 +196,7 @@ export async function safeFetch(
   url: string,
   options: RequestInit & { timeoutMs?: number } = {},
 ): Promise<Response> {
-  // 1. Scheme must be http or https
-  if (!url.startsWith("http://") && !url.startsWith("https://")) {
-    throw new Error(`SSRF protection: only http:// and https:// URLs are allowed (got: ${url.slice(0, 80)}).`);
-  }
-
-  // 2. Parse and extract hostname
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    throw new Error(`Invalid URL: ${url.slice(0, 80)}`);
-  }
-
-  // Strip surrounding brackets from IPv6 (e.g. [::1] → ::1)
-  const hostname = parsed.hostname.replace(/^\[|\]$/g, "").toLowerCase();
-
-  // 3. Block localhost/loopback names
-  if (hostname === "localhost" || hostname === "0.0.0.0") {
-    throw new Error(`SSRF protection: access to '${hostname}' is not allowed.`);
-  }
-
-  // 4. Block IPv4 private / loopback / link-local / special ranges
-  const ipv4 = hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (ipv4) {
-    const [a, b] = [Number(ipv4[1]), Number(ipv4[2])];
-    if (
-      a === 0 ||                               // 0.x.x.x — "this" network
-      a === 10 ||                              // 10.x.x.x — RFC-1918
-      a === 127 ||                             // 127.x.x.x — loopback
-      (a === 100 && b >= 64 && b <= 127) ||   // 100.64.x.x–100.127.x.x — CGNAT RFC-6598
-      (a === 169 && b === 254) ||              // 169.254.x.x — link-local / cloud metadata
-      (a === 172 && b >= 16 && b <= 31) ||    // 172.16–31.x.x — RFC-1918
-      (a === 192 && b === 168) ||             // 192.168.x.x — RFC-1918
-      a === 198 ||                             // 198.18.x.x, 198.51.100.x (TEST-NET)
-      a >= 224                                 // 224+ — multicast / reserved
-    ) {
-      throw new Error(`SSRF protection: access to private/reserved IP '${hostname}' is not allowed.`);
-    }
-  }
-
-  // 5. Block IPv6 loopback and link-local
-  if (
-    hostname === "::1" ||
-    hostname.startsWith("fe80") ||   // link-local
-    hostname.startsWith("fc00") ||   // unique local (ULA)
-    hostname.startsWith("fd")        // ULA (fd00::/8)
-  ) {
-    throw new Error(`SSRF protection: access to IPv6 special-purpose address '${hostname}' is not allowed.`);
-  }
-
-  // 6. Build signal: prefer caller's signal if provided, otherwise use timeout
-  const { timeoutMs = 30_000, signal: callerSignal, ...fetchOptions } = options;
-  const timeoutSignal = AbortSignal.timeout(timeoutMs);
-  // Combine caller signal + timeout signal if both present
-  const signal = callerSignal
-    ? AbortSignal.any([callerSignal, timeoutSignal])
-    : timeoutSignal;
-
-  return fetch(url, { ...fetchOptions, signal });
+  return safeFetchHop(url, options, 0);
 }
 
 // ─── Path Heuristics ──────────────────────────────────────────────────────────

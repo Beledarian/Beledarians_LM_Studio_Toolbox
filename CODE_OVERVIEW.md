@@ -27,8 +27,10 @@ src/
     en.ts / de.ts / zh-CN.ts / zh-TW.ts
   tools/
     context.ts               # ToolContext interface — shared mutable state for all modules
-    helpers.ts               # validatePath, safeFetch (SSRF guard), parseProtectedPaths,
-                             #   cosineSimilarity, performRagOnText, getDenoPath, getPythonPath
+    helpers.ts               # validatePath, parseProtectedPaths, isBlockedIp, validateSsrfUrl,
+                             #   safeFetch (SSRF guard — redirect-safe, DNS pre-check),
+                             #   cosineSimilarity, performRagOnText, ragLocalFiles,
+                             #   getDenoPath, getPythonPath
     fileTools.ts             # File I/O: read, write, edit, search, navigate, delete
     codeTools.ts             # Code execution: JS (Deno sandbox), Python (audit-hook sandbox),
                              #   shell commands, terminal, background tasks
@@ -51,7 +53,7 @@ tests/
   nodeNotifier.test.js            # Dynamic import regression for node-notifier
   promptPreprocessor.test.js      # getSubAgentDocsCandidatePaths unit test
   pythonSandbox.test.js           # Python audit-hook sandbox smoke tests (12 cases)
-  security.test.js                # validatePath, parseProtectedPaths, safeFetch SSRF (23 cases)
+  security.test.js                # validatePath, parseProtectedPaths, safeFetch SSRF, isBlockedIp (53 cases)
   subAgentToolCallParser.test.js  # parseSubAgentResponseMessage (50 cases)
   subAgentValidation.test.js      # validateToolCall unit tests
 ```
@@ -84,7 +86,7 @@ interface ToolContext {
 |---|---|
 | Workspace path isolation | `validatePath()` blocks `..` traversal and absolute paths outside CWD |
 | Protected paths | `protectedPaths` config parsed at startup; checked in `validatePath` and `change_directory` |
-| SSRF prevention | `safeFetch()` in `helpers.ts` blocks loopback, RFC-1918, link-local, and cloud-metadata IPs |
+| SSRF prevention | `safeFetch()` in `helpers.ts` blocks loopback, RFC-1918, link-local, cloud-metadata, and IPv4-mapped IPv6; every redirect hop is re-validated before following; best-effort DNS pre-check rejects private-resolving hostnames |
 | Browser URL schemes | `browser_session_open`/`browser_open_page` reject non-http(s) URLs |
 | Python sandbox | `sys.addaudithook` blocks network, subprocess, and writes outside CWD |
 | JavaScript sandbox | Deno with `--deny-net --deny-env --deny-sys --deny-run --deny-ffi` |

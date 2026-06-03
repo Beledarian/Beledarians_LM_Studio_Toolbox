@@ -249,17 +249,6 @@ Your goal is to execute complex tasks (coding, research, debugging) autonomously
 - For `read_file`: use `"file_name"` key
 - Output ONLY the JSON object, no prose around it
 
-## ? Tool Call Format Reminder (IMPORTANT)
-**Always use this EXACT JSON format for tool calls:**
-```json
-{"tool": "tool_name", "args": {"arg_name": "value"}}
-```
-- Use `"tool"` key (NOT `"function"`)
-- Use `"args"` key (NOT `"parameters"`)
-- For `save_file`: use `"file_name"` and `"content"` keys
-- For `read_file`: use `"file_name"` key
-- Output ONLY the JSON object, no prose around it
-
 ## ? Completion
 When you have finished the task and SAVED all necessary files:
 1.  Output "TASK_COMPLETED".

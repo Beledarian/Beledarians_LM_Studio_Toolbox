@@ -1,8 +1,8 @@
 # Beledarian's LM Studio Tools 
 
-[English](README.md) | [Deutsch](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox/blob/main/README.de.md) | [简体中文](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox/blob/main/README.zh-CN.md) | [繁體中文](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox/blob/main/README.zh-TW.md)
+[English](README.md) | [Deutsch](README.de.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md)
 
-[![GitHub](https://img.shields.io/badge/GitHub-Repository-blue?logo=github)](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox)
+[![GitHub](https://img.shields.io/badge/GitHub-Repository-blue?logo=github)](https://github.com/haggyroth/LM_Studio_Toolbox)
 
 This project is a plugin for [LM Studio](https://lmstudio.ai/) that provides a rich set of tools to a large language model. It acts as a bridge between the LLM and your local environment, enabling autonomous coding, research, and file management.
 
@@ -19,19 +19,29 @@ This project is a plugin for [LM Studio](https://lmstudio.ai/) that provides a r
 - **Batch Processing:** `save_file` supports creating multiple files in one go.
 - **Cleanup:** Use `delete_files_by_pattern` to wipe temporary files instantly.
 
-> **Encountering issues?** Feel free to [submit them on GitHub](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox/issues).
+> **Encountering issues?** Feel free to [submit them on GitHub](https://github.com/haggyroth/LM_Studio_Toolbox/issues).
 >
-> **Find this project helpful?** Consider [giving it a ⭐ on GitHub](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox) or [contributing!](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox/tree/main?tab=contributing-ov-file) Thank you for using the toolbox.
+> **Find this project helpful?** Consider [giving it a ⭐ on GitHub](https://github.com/haggyroth/LM_Studio_Toolbox) or [contributing!](CONTRIBUTING.md) Thank you for using the toolbox.
 
 
-### Recent Updates (v1.3.2)
+### Recent Updates (v2.0.0)
+
+- **🛡️ SSRF Hardening:** `safeFetch` now re-validates every HTTP redirect hop, adds a best-effort DNS pre-check, fixes the IPv6 ULA full-range check (`fc00::/7`), handles IPv4-mapped IPv6 (`::ffff:`), and corrects the `198.0.0.0/8` over-block.
+- **🧠 Persistent Memory CRUD:** Full SQLite-backed memory system — `save_memory`, `list_memories`, `search_memories`, `update_memory`, `delete_memory`. Top 50 memories injected into context automatically on each conversation turn.
+- **⚡ Embedding Cache:** `rag_local_files` caches chunk embeddings keyed by file path + mtime, avoiding redundant re-embeds for unchanged files.
+- **🔧 Prompt Preprocessor:** First-turn injection of tool docs, memories, and startup context files.
+- **🐍 Python Sandbox:** `run_python` uses `sys.addaudithook` to block network access, subprocess spawning, and writes outside the workspace.
+- **🧹 Code Quality:** ESLint config with `no-new-func: error` and `no-unused-vars: error`; dead code removed; background-command pruning via TTL.
+- **📋 Developer tooling:** `npm run ci` pipeline (typecheck → lint → build → test); 192 tests (180 active, 12 skipped pending native bindings).
+
+<details>
+<summary><strong>Older Updates (v1.3.2 & earlier)</strong></summary>
+
+### v1.3.2
 
 - **🛠️ Tool Reordering & Optimization:** Reordered the tools list to prioritize casual utilities, improving agent tool selection. Upgraded the web search tool with smart Chrome detection and fallback.
 - **🤖 Sub-Agent Reliability Rework:** Overhauled the sub-agent loop to prevent infinite loops, improved tool call parsing, unified path/content normalization, and added explicit task completion/abortion capabilities (`TASK_FAILED`).
 - **✨ New Sub-Agent Tools:** Empowered sub-agents with `multi_replace_text`, `search_directory`, and background command execution. Main agents now support robust batch file saving.
-
-<details>
-<summary><strong>Older Updates (v1.3.1 & earlier)</strong></summary>
 
 ### v1.3.1
 
@@ -199,10 +209,11 @@ Access these settings in the LM Studio "Plugins" tab:
 
 ### Utils
 
-- `rag_local_files`: Search your code.
-- `save_memory`: Long-term memory.
+- `rag_local_files`: Semantic search over workspace files.
+- `save_memory`, `list_memories`, `search_memories`, `update_memory`, `delete_memory`: SQLite-backed persistent memory CRUD. Top 50 memories are automatically injected into the LLM context on the first turn of every conversation.
+- `query_database`: Read-only SQL queries against a SQLite database file in your workspace.
 - `get_system_info`, `read_clipboard`, `write_clipboard`
 
 ## Developer Guide
 
-See [CODE_OVERVIEW.md](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox/blob/main/CODE_OVERVIEW.md) for architectural details.
+See [CODE_OVERVIEW.md](CODE_OVERVIEW.md) for architectural details.
