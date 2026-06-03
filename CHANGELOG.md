@@ -13,6 +13,13 @@ This project follows [Semantic Versioning](https://semver.org/):
 
 ---
 
+## [3.3.0] — 2026-06-03
+
+### Changed
+- **`run_test_command` streaming output** — test results now stream line-by-line through `toolCtx.status()` as they arrive. Users see `PASS src/auth.test.ts` ticking through the LM Studio UI sidebar instead of a frozen spinner for the full test run duration (N.3)
+
+---
+
 ## [3.2.0] — 2026-06-03
 
 ### Added

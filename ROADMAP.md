@@ -320,6 +320,15 @@ Add an `interrupt_sub_agent(message)` tool that injects a correction into the su
 | M.3 | Session persistence enrichment | 3 hours | ✅ Done |
 | M.4 | Workspace profiles | 3 hours | ✅ Done |
 | M.5 | MCP server mode | 2 days | ✅ Done |
-| N.1–5 | Quick wins (atomic writes, token estimate, test streaming, word diff, exclude patterns) | ~4 hours | 📋 Planned |
-| N.6–11 | Medium features (analyze_project, CSV/JSON tools, file watcher, AST search, screenshot, audit log) | ~2 days | 📋 Planned |
+| N.1 | Atomic file writes | ~30m | ✅ Done |
+| N.2 | `read_file` token estimate | ~30m | ✅ Done |
+| N.3 | `run_test_command` streaming output | ~30m | ✅ Done |
+| N.4 | `git_diff` word-level mode | ~30m | ✅ Done |
+| N.5 | `search_directory` exclusion patterns | ~30m | ✅ Done |
+| N.6 | `analyze_project` tool | ~2h | ✅ Done |
+| N.7 | `query_csv` and `transform_json` tools | ~3h | 📋 Planned |
+| N.8 | `watch_file` / `watch_directory` | ~3h | 📋 Planned |
+| N.9 | `find_symbol` and `find_usages` (AST) | ~3h | 📋 Planned |
+| N.10 | `capture_screenshot` tool | ~2h | 📋 Planned |
+| N.11 | Audit log | ~1h | ✅ Done |
 | N.12–16 | Big bets (custom plugins, auto-memory, rename_symbol, diff editing, sub-agent steering) | ~1 week | 📋 Planned |

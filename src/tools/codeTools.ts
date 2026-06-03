@@ -384,7 +384,7 @@ export function createCodeTools(ctx: ToolContext): Tool[] {
     parameters: {
       command: z.string().describe("The test command to run (e.g., 'npm test', 'pytest')."),
     },
-    implementation: async ({ command }) => {
+    implementation: async ({ command }, toolCtx) => {
       return new Promise(resolve => {
         const parts = command.split(" ");
         const child = spawn(parts[0], parts.slice(1), {
@@ -392,7 +392,18 @@ export function createCodeTools(ctx: ToolContext): Tool[] {
         });
         let stdout = "";
         let stderr = "";
-        child.stdout.on("data", d => { stdout += d.toString(); });
+        let lineBuffer = "";
+        child.stdout.on("data", d => {
+          const chunk = d.toString();
+          stdout += chunk;
+          lineBuffer += chunk;
+          const lines = lineBuffer.split("\n");
+          lineBuffer = lines.pop() ?? "";
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (trimmed) toolCtx?.status?.(trimmed);
+          }
+        });
         child.stderr.on("data", d => { stderr += d.toString(); });
         child.on("close", code => resolve({ command, exit_code: code, stdout: stdout.trim(), stderr: stderr.trim(), passed: code === 0 }));
         child.on("error", err => resolve({ command, error: err.message, passed: false }));
