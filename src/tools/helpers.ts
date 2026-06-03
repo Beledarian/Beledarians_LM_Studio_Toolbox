@@ -249,23 +249,49 @@ export const createSafeToolImplementation = <TParameters, TReturn>(
 // ─── RAG / Embeddings ─────────────────────────────────────────────────────────
 
 /**
- * Module-level embedding cache for rag_local_files (PERF-2).
+ * Module-level LRU embedding cache for rag_local_files (PERF-2).
  *
- * Keyed by absolute file path.  Each entry stores the file's mtime at the
- * time it was embedded plus the chunk strings and their embedding vectors.
- * Before embedding a file we stat() it — if the mtime hasn't changed since
- * the last embed we reuse the cached vectors, paying only for the query embed.
+ * Keyed by `"<modelName>::<absoluteFilePath>"` so that switching embedding
+ * models never serves stale vectors from a different model (BUG-R1 fix).
  *
- * The cache lives for the lifetime of the plugin process (never evicted).
- * Deleted files are harmless — their path simply won't be found in future
- * readdir() scans.  Modified files are detected via mtime.
+ * Each entry stores the mtime at embed time plus the chunk strings and their
+ * vectors.  Before embedding a file we stat() it — if the mtime is unchanged
+ * we reuse the cached vectors, paying only for the query embed.
+ *
+ * The cache is capped at EMBEDDING_CACHE_MAX_ENTRIES.  On overflow the
+ * least-recently-used entry is evicted (Map preserves insertion order; hits
+ * move their key to the end via delete+re-set) (PERF-R1 fix).
  */
 interface EmbeddingCacheEntry {
   mtime: number;
   chunks: string[];
   embeddings: number[][];
 }
+
+const EMBEDDING_CACHE_MAX_ENTRIES = 200;
 const _embeddingCache = new Map<string, EmbeddingCacheEntry>();
+
+/** Read a cache entry and mark it as most-recently-used. */
+function _cacheGet(key: string): EmbeddingCacheEntry | undefined {
+  const entry = _embeddingCache.get(key);
+  if (!entry) return undefined;
+  // Move to end of insertion order (LRU promotion)
+  _embeddingCache.delete(key);
+  _embeddingCache.set(key, entry);
+  return entry;
+}
+
+/** Write a cache entry, evicting the LRU entry if the cap is exceeded. */
+function _cacheSet(key: string, entry: EmbeddingCacheEntry): void {
+  // If key already exists, remove it first so re-insert lands at the end
+  _embeddingCache.delete(key);
+  if (_embeddingCache.size >= EMBEDDING_CACHE_MAX_ENTRIES) {
+    // Delete the oldest (first) key
+    const oldest = _embeddingCache.keys().next().value;
+    if (oldest !== undefined) _embeddingCache.delete(oldest);
+  }
+  _embeddingCache.set(key, entry);
+}
 
 /** Shared binary extensions skipped by RAG scans. */
 const BINARY_EXT_RE = /\.(png|jpg|jpeg|gif|ico|exe|dll|bin|pdf|docx|zip|tar|gz|wasm|node)$/i;
@@ -311,15 +337,18 @@ export async function ragLocalFiles(opts: {
   const [queryEmbedding] = await embeddingModel.embed([query]);
 
   // 3. Separate cache-hits from files that need (re-)embedding
+  //    Cache key includes the model name so switching models never reuses
+  //    vectors produced by a different model (BUG-R1).
   type FileMeta = { fullPath: string; name: string };
   const hits: FileMeta[] = [];
   const misses: FileMeta[] = [];
 
   await Promise.all(candidates.map(async e => {
     const fullPath = join((e as any).parentPath ?? (e as any).path, e.name);
+    const cacheKey = `${embeddingModelName}::${fullPath}`;
     try {
       const mtime = (await stat(fullPath)).mtimeMs;
-      const cached = _embeddingCache.get(fullPath);
+      const cached = _cacheGet(cacheKey);
       if (cached && cached.mtime === mtime) {
         hits.push({ fullPath, name: e.name });
       } else {
@@ -332,13 +361,14 @@ export async function ragLocalFiles(opts: {
 
   // 4. Batch-embed all cache-miss files
   for (const { fullPath, name } of misses) {
+    const cacheKey = `${embeddingModelName}::${fullPath}`;
     try {
       const content = await readFile(fullPath, "utf-8");
       const chunks = content.split(/\n\s*\n/).filter(c => c.trim().length > 20);
       if (chunks.length === 0) continue;
       const embeddings = await embeddingModel.embed(chunks);
       const mtime = (await stat(fullPath)).mtimeMs;
-      _embeddingCache.set(fullPath, {
+      _cacheSet(cacheKey, {
         mtime,
         chunks,
         embeddings: embeddings.map((e: { embedding: number[] }) => e.embedding),
@@ -352,7 +382,8 @@ export async function ragLocalFiles(opts: {
   // 5. Score all cached chunks against the query
   const allChunks: RagLocalResult[] = [];
   for (const { fullPath, name } of hits) {
-    const cached = _embeddingCache.get(fullPath);
+    const cacheKey = `${embeddingModelName}::${fullPath}`;
+    const cached = _cacheGet(cacheKey);
     if (!cached) continue;
     cached.chunks.forEach((chunk, i) => {
       const score = cosineSimilarity(queryEmbedding.embedding, cached.embeddings[i]);
@@ -365,6 +396,15 @@ export async function ragLocalFiles(opts: {
 }
 
 export function cosineSimilarity(vecA: number[], vecB: number[]): number {
+  // BUG-R2: mismatched dimensions (e.g. after a model change mid-session)
+  // previously produced NaN silently.  Return 0 and warn instead.
+  if (vecA.length !== vecB.length) {
+    console.warn(
+      `cosineSimilarity: dimension mismatch (${vecA.length} vs ${vecB.length}). ` +
+      "This usually means the embedding model changed mid-session. Returning 0."
+    );
+    return 0;
+  }
   const dotProduct = vecA.reduce((acc, val, i) => acc + val * vecB[i], 0);
   const magA = Math.sqrt(vecA.reduce((acc, val) => acc + val * val, 0));
   const magB = Math.sqrt(vecB.reduce((acc, val) => acc + val * val, 0));
