@@ -1,9 +1,53 @@
 import { type Tool, type ToolsProvider } from "@lmstudio/sdk";
 import type { LMStudioClient } from "@lmstudio/sdk";
+import { appendFile, mkdir } from "fs/promises";
+import { join } from "path";
+import { homedir } from "os";
 import { pluginConfigSchematics } from "./config";
 import { getPersistedState, savePersistedState, ensureWorkspaceExists } from "./stateManager";
 import type { ToolContext } from "./tools/context";
 import { parseProtectedPaths } from "./tools/helpers";
+
+// ── N.11: Audit log ───────────────────────────────────────────────────────────
+
+const AUDIT_LOG_DIR  = join(homedir(), ".lm-studio-toolbox");
+const AUDIT_LOG_PATH = join(AUDIT_LOG_DIR, "audit.log");
+
+/** Wrap a tool so every call is logged to audit.log when enableAuditLog is on. */
+function withAudit(t: Tool, enabled: boolean): Tool {
+  if (!enabled) return t;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const wrapped: any = { ...t };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  wrapped.implementation = async (params: Record<string, unknown>, toolCtx: any): Promise<unknown> => {
+      const startMs = Date.now();
+      let status = "ok";
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const result = await (t as any).implementation(params, toolCtx);
+        if (result && typeof result === "object" && "error" in result) status = "error";
+        return result;
+      } catch (err) {
+        status = "throw";
+        throw err;
+      } finally {
+        const elapsed = Date.now() - startMs;
+        // Summarise args: omit large content fields to keep the log readable
+        const argsSummary = Object.fromEntries(
+          Object.entries(params).map(([k, v]) =>
+            [k, typeof v === "string" && v.length > 80 ? `${v.substring(0, 80)}…` : v]
+          )
+        );
+        const entry = JSON.stringify({
+          ts: new Date().toISOString(), tool: t.name, args: argsSummary, status, elapsed_ms: elapsed,
+        });
+        mkdir(AUDIT_LOG_DIR, { recursive: true })
+          .then(() => appendFile(AUDIT_LOG_PATH, entry + "\n", "utf-8"))
+          .catch(() => {}); // fire-and-forget; never block tool execution
+      }
+  };
+  return wrapped as Tool;
+}
 
 import { createFileTools } from "./tools/fileTools";
 import { createCodeTools } from "./tools/codeTools";
@@ -88,6 +132,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     ? allTools.filter(t => !disabledToolNames.has(t.name))
     : allTools;
 
+  // ── N.11: Audit log wrapper ──────────────────────────────────────────────────
+  const auditEnabled: boolean = pluginConfig.get("enableAuditLog") ?? false;
+  const auditedTools = filteredTools.map(t => withAudit(t, auditEnabled));
+
   // ── Sort: casual/general-purpose tools first, advanced/developer tools second ─
   const casualTools = new Set([
     "analyze_project",
@@ -109,7 +157,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     "git_pull", "git_push", "git_fetch", "git_stash",
   ]);
 
-  filteredTools.sort((a, b) => {
+  auditedTools.sort((a, b) => {
     const aCasual = casualTools.has(a.name);
     const bCasual = casualTools.has(b.name);
     if (aCasual && !bCasual) return -1;
@@ -117,5 +165,5 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     return a.name.localeCompare(b.name);
   });
 
-  return filteredTools;
+  return auditedTools;
 };

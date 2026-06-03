@@ -212,4 +212,10 @@ export const pluginConfigSchematics = createConfigSchematics()
     displayName: "Disabled Tools",
     subtitle: "Comma-separated list of tool names to remove from the model's tool list, regardless of other settings. Useful for read-only or restricted configurations. Example: delete_path,execute_command,run_python",
   }, "")
+
+  // ── Audit log (N.11) ──────────────────────────────────────────────────────
+  .field("enableAuditLog", "boolean", {
+    displayName: "Enable Audit Log",
+    subtitle: "Write an NDJSON entry to ~/.lm-studio-toolbox/audit.log for every tool call (name, args summary, status, elapsed ms). Useful for reviewing what the model did during a session. Default: off.",
+  }, false)
   .build();

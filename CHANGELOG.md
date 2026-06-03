@@ -13,6 +13,14 @@ This project follows [Semantic Versioning](https://semver.org/):
 
 ---
 
+## [3.2.0] — 2026-06-03
+
+### Added
+- **`search_directory` exclusion patterns** — new `exclude: string[]` parameter skips additional directories or filename globs (e.g. `["dist", "coverage", "*.min.js"]`). `node_modules` and `.git` are always excluded (N.5)
+- **Audit log** — new `enableAuditLog` config field (default: off). When enabled, writes an NDJSON entry to `~/.lm-studio-toolbox/audit.log` for every tool call: tool name, args summary (truncated at 80 chars), result status (`ok`/`error`/`throw`), and elapsed ms. Implemented as a transparent wrapper in `toolsProvider` (N.11)
+
+---
+
 ## [3.1.0] — 2026-06-03
 
 ### Added

@@ -423,12 +423,29 @@ export function createFileTools(ctx: ToolContext): Tool[] {
       pattern: z.string().describe("Regex pattern or string to search for"),
       use_regex: z.boolean().optional().default(false),
       case_sensitive: z.boolean().optional().default(false).describe("Whether the search is case-sensitive. Default: false."),
+      exclude: z.array(z.string()).optional().describe("Additional directory or filename patterns to skip (e.g. ['dist', 'coverage', '*.min.js']). node_modules and .git are always excluded."),
     },
-    implementation: async ({ directory_path, pattern, use_regex, case_sensitive = false }, toolCtx) => {
+    implementation: async ({ directory_path, pattern, use_regex, case_sensitive = false, exclude = [] }, toolCtx) => {
       try {
         const targetDir = directory_path ? validatePath(ctx.cwd, directory_path, ctx.protectedPaths) : ctx.cwd;
         const flags = case_sensitive ? "g" : "gi";
         const regex = new RegExp(use_regex ? pattern : pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), flags);
+
+        // Build exclusion set from always-excluded dirs + user-provided patterns
+        const ALWAYS_EXCLUDE = new Set(["node_modules", ".git"]);
+        const shouldExclude = (name: string, fullPath: string): boolean => {
+          if (ALWAYS_EXCLUDE.has(name) || name.startsWith(".")) return true;
+          for (const pat of exclude) {
+            // Simple glob: treat patterns with * as suffix/prefix wildcards, else exact match
+            if (pat.includes("*")) {
+              const escaped = pat.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
+              if (new RegExp(`^${escaped}$`, "i").test(name)) return true;
+            } else if (name === pat || fullPath.includes(`/${pat}/`) || fullPath.endsWith(`/${pat}`)) {
+              return true;
+            }
+          }
+          return false;
+        };
 
         // Collect all candidate file paths first, then search in parallel
         // with bounded concurrency (8 simultaneous reads) for large trees.
@@ -439,8 +456,8 @@ export function createFileTools(ctx: ToolContext): Tool[] {
         async function collectFiles(dir: string): Promise<void> {
           const entries = await readdir(dir);
           await Promise.all(entries.map(async (entry) => {
-            if (entry === "node_modules" || entry === ".git" || entry.startsWith(".")) return;
             const fullPath = join(dir, entry);
+            if (shouldExclude(entry, fullPath)) return;
             try {
               const st = await stat(fullPath);
               if (st.isDirectory()) await collectFiles(fullPath);
