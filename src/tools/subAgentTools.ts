@@ -14,6 +14,10 @@ import { runPythonImpl, runJavascriptImpl } from "./codeTools";
 const MAX_SUB_AGENT_OUTPUT_CHARS = 30_000;
 /** Timeout (ms) applied to all external web fetch calls inside the sub-agent. */
 const WEB_FETCH_TIMEOUT_MS = 15_000;
+/** Maximum automatic retries on transient network errors before surfacing the error. */
+const MAX_ENDPOINT_RETRIES = 2;
+/** Delay (ms) between retry attempts when the secondary endpoint is unreachable. */
+const ENDPOINT_RETRY_BACKOFF_MS = 5_000;
 
 /**
  * Strip HTML tags, scripts, styles and decode common entities so that
@@ -43,12 +47,14 @@ export function createSubAgentTools(ctx: ToolContext): Tool[] {
     description: "Delegate a task to a secondary agent. IMPORTANT: If the task is 'coding' or 'writing files', the secondary agent will AUTOMATICALLY CREATE AND SAVE the files to the disk. You do NOT need to save them yourself. The tool returns a list of generated files. Trust this list.",
     parameters: {
       task: z.string(),
-      agent_role: z.string().optional().describe("Key from 'Sub-Agent Profiles' config (e.g., 'coder'). Default: 'general'."),
+      agent_role: z.string().optional().describe("Key from 'Sub-Agent Profiles' config (e.g., 'coder', 'reviewer', 'researcher', 'debugger', 'tester', 'documenter', 'planner', 'data_analyst'). Default: 'general'."),
       context: z.string().optional().describe("Additional context or data for the agent."),
       allow_tools: z.boolean().optional().describe("If true, the secondary agent can use tools like Web Search, File System, and Code Execution. Default: false."),
+      chain: z.array(z.string()).optional().describe("Optional list of additional roles to run in sequence after the primary role, each receiving the previous output as context. Example: ['tester', 'reviewer'] runs the tester then the reviewer on the coder's output."),
+      readonly: z.boolean().optional().describe("If true, the sub-agent cannot write, modify, or delete files. Use for research or review roles that should only read. Default: false."),
     },
     implementation: createSafeToolImplementation(
-      async ({ task, agent_role = "general", context = "", allow_tools = false }) => {
+      async ({ task, agent_role = "general", context = "", allow_tools = false, chain = [], readonly = false }) => {
         // Resolve config
         let endpoint: string = ctx.pluginConfig.get("secondaryAgentEndpoint");
         let modelId: string = ctx.pluginConfig.get("secondaryModelId");
@@ -79,6 +85,7 @@ export function createSubAgentTools(ctx: ToolContext): Tool[] {
           forceTools = false,
           cwd: string,
           deadlineMs: number = Date.now() + subAgentTimeLimitSec * 1000,
+          readonlyMode = false,
         ) => {
           let currentSystemPrompt = "You are a helpful assistant.";
 
@@ -107,19 +114,19 @@ export function createSubAgentTools(ctx: ToolContext): Tool[] {
           const toolsEnabled = allow_tools || forceTools;
           if (toolsEnabled) {
             const allowedTools: string[] = [];
-            if (allowFileSystem) allowedTools.push(
-              "read_file", "read_file_range", "list_directory",
-              "search_in_file", "find_files",
-              "save_file", "append_file", "replace_text_in_file",
-              "delete_files_by_pattern", "rag_local_files", "fuzzy_find_local_files",
-            );
+            if (allowFileSystem) {
+              // J.4: readonly mode — only expose read tools, no writes or deletes
+              allowedTools.push("read_file", "read_file_range", "list_directory", "search_in_file", "find_files", "fuzzy_find_local_files", "rag_local_files");
+              if (!readonlyMode) allowedTools.push("save_file", "append_file", "replace_text_in_file", "delete_files_by_pattern");
+            }
             if (allowWeb) allowedTools.push("wikipedia_search", "web_search", "fetch_web_content", "rag_web_content");
             if (allowWeb && allowSubAgentBrowserControl && ctx.allowBrowserControl) allowedTools.push("browser_session_open", "browser_session_control", "browser_session_close");
-            if (allowCode) allowedTools.push("run_python", "run_javascript");
+            if (allowCode && !readonlyMode) allowedTools.push("run_python", "run_javascript");
 
             if (allowedTools.length > 0) {
+              const readonlyNote = readonlyMode ? " (READ-ONLY mode: you may not save, modify, or delete files)" : "";
               const toolsList = allowedTools.join(", ");
-              currentSystemPrompt += `\n\n## Allowed Tools\nYou have access to the following tools via JSON output: ${toolsList}.\nFormat tool calls exactly as: {"tool": "tool_name", "args": {"arg_name": "value"}}`;
+              currentSystemPrompt += `\n\n## Allowed Tools${readonlyNote}\nYou have access to the following tools via JSON output: ${toolsList}.\nFormat tool calls exactly as: {"tool": "tool_name", "args": {"arg_name": "value"}}`;
               toolsReminder = `\n\n[SYSTEM REMINDER: You have access to tools: ${toolsList}. If you need information you don't have, USE A TOOL. Format: {"tool": "tool_name", "args": {...}}]`;
             }
           }
@@ -145,16 +152,47 @@ export function createSubAgentTools(ctx: ToolContext): Tool[] {
             const remainingMs = deadlineMs - Date.now();
             if (remainingMs <= 0) {
               if (subAgentDebugLogging) console.log(`[Sub-Agent] Time limit of ${subAgentTimeLimitSec}s exceeded after ${loops} loop(s).`);
-              return { error: `Sub-agent time limit (${subAgentTimeLimitSec}s) exceeded.`, filesModified };
+              // J.1: partial-progress recovery — surface whatever was done so far
+              const progressSummary = finalContent
+                ? `${finalContent.substring(0, 500)}${finalContent.length > 500 ? "…" : ""}`
+                : "No output produced before timeout.";
+              return {
+                error: `Sub-agent time limit (${subAgentTimeLimitSec}s) exceeded after ${loops} turn(s). Partial progress: ${progressSummary}`,
+                filesModified,
+                status: "timeout",
+              };
             }
 
+            // J.1: progress heartbeat — visible in debug logs on every turn
+            console.log(`[Sub-agent: Turn ${loops + 1}/${loopLimit}, role: ${role}]`);
+
+            // J.1: retry helper — retries up to MAX_ENDPOINT_RETRIES times on transient
+            // network failures (ECONNREFUSED, TypeError) before surfacing the error.
+            const fetchWithRetry = async (): Promise<Response> => {
+              let lastErr: Error = new Error("Unknown fetch error");
+              for (let attempt = 0; attempt <= MAX_ENDPOINT_RETRIES; attempt++) {
+                const attemptRemaining = deadlineMs - Date.now();
+                if (attemptRemaining <= 0) throw new Error(`Sub-agent time limit (${subAgentTimeLimitSec}s) exceeded.`);
+                try {
+                  return await fetch(`${endpoint}/chat/completions`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ model: modelId, messages: msgList, temperature: subAgentTemperature, stream: false }),
+                    signal: AbortSignal.timeout(attemptRemaining),
+                  });
+                } catch (err) {
+                  lastErr = err instanceof Error ? err : new Error(String(err));
+                  const isTransient = err instanceof TypeError || (err as any)?.code === "ECONNREFUSED";
+                  if (!isTransient || attempt === MAX_ENDPOINT_RETRIES) throw lastErr;
+                  console.log(`[Sub-Agent] Endpoint unreachable (attempt ${attempt + 1}/${MAX_ENDPOINT_RETRIES + 1}), retrying in ${ENDPOINT_RETRY_BACKOFF_MS / 1000}s… Check that LM Studio is running and the secondary model is loaded.`);
+                  await new Promise(r => setTimeout(r, ENDPOINT_RETRY_BACKOFF_MS));
+                }
+              }
+              throw lastErr;
+            };
+
             try {
-              const response = await fetch(`${endpoint}/chat/completions`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ model: modelId, messages: msgList, temperature: subAgentTemperature, stream: false }),
-                signal: AbortSignal.timeout(remainingMs),
-              });
+              const response = await fetchWithRetry();
 
               if (!response.ok) {
                 const errorBody = (await response.text().catch(() => "")).replace(/\s+/g, " ").trim().substring(0, 600);
@@ -496,7 +534,16 @@ export function createSubAgentTools(ctx: ToolContext): Tool[] {
                 const shouldTreatAsFinalResponse = trimmed.length >= 120 && !planningLikeText;
                 noToolCallCount++;
 
-                if (content.includes("TASK_COMPLETED") || content.includes("TASK_FAILED") || shouldTreatAsFinalResponse || noToolCallCount >= 3 || loops >= loopLimit - 1) break;
+                // J.1: stall detection — after 3 consecutive turns with no tool call
+                // and no termination signal, surface a structured stall status so the
+                // main agent can retry with a narrower scope rather than getting silence.
+                if (noToolCallCount >= 3) {
+                  if (subAgentDebugLogging) console.log(`[Sub-Agent] Stalled after ${loops + 1} turn(s) — no tool calls for 3 consecutive turns.`);
+                  finalContent = content || finalContent;
+                  break; // break then fall through to return below
+                }
+
+                if (content.includes("TASK_COMPLETED") || content.includes("TASK_FAILED") || shouldTreatAsFinalResponse || loops >= loopLimit - 1) break;
 
                 if (content.trim().length > 0) msgList.push({ role: "assistant", content });
 
@@ -614,14 +661,42 @@ export function createSubAgentTools(ctx: ToolContext): Tool[] {
         };
 
         // ── Primary agent loop ───────────────────────────────────────────────
-        // Shared deadline: primary + debug reviewer run together within the time limit.
+        // Shared deadline: primary + chain + debug reviewer all share this budget.
         const sharedDeadlineMs = Date.now() + subAgentTimeLimitSec * 1000;
-        const primaryResult = await runAgentLoop(agent_role, task, context, 8, false, ctx.cwd, sharedDeadlineMs);
+        const primaryResult = await runAgentLoop(agent_role, task, context, 8, false, ctx.cwd, sharedDeadlineMs, readonly);
         if (primaryResult.error) return { error: primaryResult.error };
 
         let finalResponse = primaryResult.response || "";
         let handoffMessage = primaryResult.handoff_message;
         const generatedFiles = [...(primaryResult.filesModified ?? [])];
+
+        // ── J.3 Role chaining ────────────────────────────────────────────────
+        // Each role in `chain` receives the previous role's output + modified
+        // files as its context, sharing the same wall-clock deadline.
+        if (chain.length > 0) {
+          let chainContext = finalResponse;
+          for (const chainRole of chain) {
+            // Summarise files modified so far for the next role's context
+            const filesSoFar = generatedFiles.length > 0
+              ? `\n\nFiles modified so far: ${generatedFiles.join(", ")}`
+              : "";
+            const chainResult = await runAgentLoop(
+              chainRole,
+              task,
+              `Previous role (${agent_role}) output:\n${chainContext}${filesSoFar}`,
+              8, allow_tools, ctx.cwd, sharedDeadlineMs, readonly,
+            );
+            if (chainResult.error) {
+              finalResponse += `\n\n--- Chain role '${chainRole}' failed: ${chainResult.error} ---`;
+              break;
+            }
+            const chainResponse = chainResult.response || "";
+            finalResponse += `\n\n--- Role: ${chainRole} ---\n${chainResponse}`;
+            generatedFiles.push(...(chainResult.filesModified ?? []));
+            chainContext = chainResponse;
+            if (!handoffMessage && chainResult.handoff_message) handoffMessage = chainResult.handoff_message;
+          }
+        }
 
         // ── Auto-Debug loop ──────────────────────────────────────────────────
         if (debugMode && (primaryResult.filesModified ?? []).length > 0) {
