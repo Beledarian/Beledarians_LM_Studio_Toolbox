@@ -8,6 +8,22 @@ import { validatePath } from "./helpers";
 import { rankFuzzyMatches } from "../fuzzySearch";
 import { savePersistedState } from "../stateManager";
 
+/**
+ * Atomic write: write to a temp file then rename into place.
+ * POSIX rename() is atomic — a crash mid-write leaves the original intact.
+ * N.1: replaces bare writeFile() calls throughout save_file and apply_patch.
+ */
+async function atomicWrite(filePath: string, content: string): Promise<void> {
+  const tmp = `${filePath}.__tmp`;
+  try {
+    await writeFile(tmp, content, "utf-8");
+    await rename(tmp, filePath);
+  } catch (e) {
+    await unlink(tmp).catch(() => {});
+    throw e;
+  }
+}
+
 export function createFileTools(ctx: ToolContext): Tool[] {
   const tools: Tool[] = [];
 
@@ -67,7 +83,11 @@ export function createFileTools(ctx: ToolContext): Tool[] {
       const checkBuffer = buffer.subarray(0, Math.min(buffer.length, 1024));
       if (checkBuffer.includes(0)) return { error: "File appears to be binary and cannot be read as text." };
 
-      return { content: buffer.toString("utf-8") };
+      const content = buffer.toString("utf-8");
+      const lineCount = content.split("\n").length;
+      const tokenEstimate = Math.round(content.length / 4);
+      // N.2: append a size hint so the model can decide whether to use read_file_range
+      return { content, _meta: { lines: lineCount, approx_tokens: tokenEstimate } };
     },
   }));
 
@@ -130,7 +150,7 @@ export function createFileTools(ctx: ToolContext): Tool[] {
         try {
           const filePath = validatePath(ctx.cwd, file.file_name, ctx.protectedPaths);
           await mkdir(dirname(filePath), { recursive: true });
-          await writeFile(filePath, file.content, "utf-8");
+          await atomicWrite(filePath, file.content);  // N.1: atomic write
           savedPaths.push(filePath);
         } catch (e) {
           errors.push(`Failed to save ${file.file_name}: ${e instanceof Error ? e.message : String(e)}`);

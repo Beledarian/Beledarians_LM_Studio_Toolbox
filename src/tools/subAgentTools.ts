@@ -1,6 +1,6 @@
 import { tool, type Tool } from "@lmstudio/sdk";
 import { z } from "zod";
-import { rm, writeFile, readdir, readFile, stat, mkdir, appendFile } from "fs/promises";
+import { rm, writeFile, readdir, readFile, stat, mkdir, appendFile, rename as fsRename, unlink as fsUnlink } from "fs/promises";
 import { join, isAbsolute, dirname, relative } from "path";
 import type { ToolContext } from "./context";
 import { validatePath, extractLikelyFilePath, createSafeToolImplementation, ragLocalFiles, type ToolCtxLike } from "./helpers";
@@ -14,6 +14,18 @@ import { runPythonImpl, runJavascriptImpl } from "./codeTools";
 const MAX_SUB_AGENT_OUTPUT_CHARS = 30_000;
 /** Timeout (ms) applied to all external web fetch calls inside the sub-agent. */
 const WEB_FETCH_TIMEOUT_MS = 15_000;
+/** Atomic write: write to temp then rename, so a crash never leaves partial content. */
+async function atomicWrite(filePath: string, content: string): Promise<void> {
+  const tmp = `${filePath}.__tmp`;
+  try {
+    await writeFile(tmp, content, "utf-8");
+    await fsRename(tmp, filePath);
+  } catch (e) {
+    await fsUnlink(tmp).catch(() => {});
+    throw e;
+  }
+}
+
 /** Maximum automatic retries on transient network errors before surfacing the error. */
 const MAX_ENDPOINT_RETRIES = 2;
 /** Delay (ms) between retry attempts when the secondary endpoint is unreachable. */
@@ -340,7 +352,7 @@ export function createSubAgentTools(ctx: ToolContext): Tool[] {
                             if (fName && fContent) {
                               const fpath = validatePath(cwd, fName);
                               await mkdir(dirname(fpath), { recursive: true });
-                              await writeFile(fpath, fContent, "utf-8");
+                              await atomicWrite(fpath, fContent);
                               filesModified.push(fName);
                               savedList.push(fName);
                             }
@@ -352,7 +364,7 @@ export function createSubAgentTools(ctx: ToolContext): Tool[] {
                           if (fileName && fileContent) {
                             const fpath = validatePath(cwd, fileName);
                             await mkdir(dirname(fpath), { recursive: true });
-                            await writeFile(fpath, fileContent, "utf-8");
+                            await atomicWrite(fpath, fileContent);
                             filesModified.push(fileName);
                             toolResult = `Success: File saved to ${fpath}`;
                           } else {
@@ -369,7 +381,7 @@ export function createSubAgentTools(ctx: ToolContext): Tool[] {
                           if (count > 1) {
                             toolResult = `Error: Found ${count} occurrences. Be more specific.`;
                           } else {
-                            await writeFile(fpath, fc.replace(args.old_string, args.new_string), "utf-8");
+                            await atomicWrite(fpath, fc.replace(args.old_string, args.new_string));
                             filesModified.push(args.file_name);
                             toolResult = "Success: Text replaced.";
                           }
@@ -621,7 +633,7 @@ export function createSubAgentTools(ctx: ToolContext): Tool[] {
                       if (fName && typeof fName === "string" && fContent && typeof fContent === "string") {
                         const fpath = validatePath(cwd, fName);
                         await mkdir(dirname(fpath), { recursive: true });
-                        await writeFile(fpath, fContent, "utf-8");
+                        await atomicWrite(fpath, fContent);
                         filesModified.push(fName);
                         processedFiles.add(fName);
                         extractedCount++;
@@ -652,7 +664,7 @@ export function createSubAgentTools(ctx: ToolContext): Tool[] {
                 try {
                   const fpath = join(cwd, fileName);
                   await mkdir(dirname(fpath), { recursive: true });
-                  await writeFile(fpath, code, "utf-8");
+                  await atomicWrite(fpath, code);
                   filesModified.push(fileName);
                   processedFiles.add(fileName);
                   finalContent = finalContent.slice(0, index) + `\n[System: File '${fileName}' created successfully.]\n` + finalContent.slice(index + fullBlock.length);

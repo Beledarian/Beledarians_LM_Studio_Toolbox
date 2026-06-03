@@ -13,6 +13,18 @@ This project follows [Semantic Versioning](https://semver.org/):
 
 ---
 
+## [3.1.0] — 2026-06-03
+
+### Added
+- **`analyze_project`** — single-call workspace orientation: directory tree, package manifest summary, git status + last 5 commits, file counts by extension, detected scripts (`test`, `build`, `dev`, `lint`). Replaces 6–8 manual tool calls at session start (N.6)
+- **`read_file` token estimate** — response now includes `_meta: { lines, approx_tokens }` so the model can decide whether to use `read_file_range` for large files (N.2)
+- **`git_diff` word-level mode** — new `word_diff: true` parameter passes `--word-diff=plain`; LLMs parse word-level diffs more accurately for prose/doc changes (N.4)
+
+### Fixed
+- **Atomic file writes** — `save_file`, sub-agent `save_file`/`replace_text_in_file`, and auto-save code blocks now write to a `.tmp` file and `rename()` into place. A crash mid-write can no longer leave a half-written file (N.1)
+
+---
+
 ## [3.0.0] — 2026-06-03
 
 ### ⚠️ Breaking Changes

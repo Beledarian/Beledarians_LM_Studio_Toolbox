@@ -379,5 +379,116 @@ export function createMiscTools(ctx: ToolContext): Tool[] {
     },
   }));
 
+  // ── N.6: analyze_project ─────────────────────────────────────────────────
+
+  tools.push(tool({
+    name: "analyze_project",
+    description: "Get a comprehensive snapshot of the current workspace to orient yourself at the start of a session. Returns directory structure, package manifest summary, git status, recent commits, detected test/build commands, and file counts — in one call instead of six.",
+    parameters: {
+      depth: z.number().int().min(1).max(4).optional().default(2).describe("Directory tree depth (default: 2, max: 4)."),
+    },
+    implementation: async ({ depth = 2 }) => {
+      const result: Record<string, unknown> = { cwd: ctx.cwd };
+
+      // ── 1. Directory tree ─────────────────────────────────────────────────
+      const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".next", "__pycache__", ".cache", "coverage"]);
+      async function buildTree(dir: string, currentDepth: number): Promise<Record<string, unknown>> {
+        const tree: Record<string, unknown> = {};
+        try {
+          const { readdir: fsReaddir, stat: fsStat } = await import("fs/promises");
+          const items = await fsReaddir(dir, { withFileTypes: true });
+          for (const item of items) {
+            if (item.name.startsWith(".") && item.name !== ".env.example") continue;
+            if (SKIP_DIRS.has(item.name)) { tree[item.name] = "(skipped)"; continue; }
+            if (item.isDirectory() && currentDepth < depth) {
+              tree[item.name + "/"] = await buildTree(pathJoin(dir, item.name), currentDepth + 1);
+            } else if (item.isDirectory()) {
+              tree[item.name + "/"] = "…";
+            } else {
+              tree[item.name] = (await fsStat(pathJoin(dir, item.name))).size;
+            }
+          }
+        } catch { /* unreadable */ }
+        return tree;
+      }
+      result.directory_tree = await buildTree(ctx.cwd, 1);
+
+      // ── 2. Package manifest ───────────────────────────────────────────────
+      const manifestCandidates = ["package.json", "pyproject.toml", "Cargo.toml", "go.mod", "composer.json"];
+      for (const manifest of manifestCandidates) {
+        try {
+          const raw = await readFile(pathJoin(ctx.cwd, manifest), "utf-8");
+          if (manifest === "package.json") {
+            const pkg = JSON.parse(raw);
+            result.package = {
+              name: pkg.name, version: pkg.version, description: pkg.description,
+              scripts: pkg.scripts ?? {},
+              dependencies: Object.keys(pkg.dependencies ?? {}).length,
+              devDependencies: Object.keys(pkg.devDependencies ?? {}).length,
+            };
+          } else {
+            result.manifest = { file: manifest, preview: raw.substring(0, 500) };
+          }
+          break;
+        } catch { /* not found */ }
+      }
+
+      // ── 3. Git info ───────────────────────────────────────────────────────
+      try {
+        const { simpleGit } = await import("simple-git");
+        const git = simpleGit(ctx.cwd);
+        const [status, log, branch] = await Promise.all([
+          git.status().catch(() => null),
+          git.log({ maxCount: 5 }).catch(() => null),
+          git.revparse(["--abbrev-ref", "HEAD"]).catch(() => null),
+        ]);
+        result.git = {
+          branch: branch?.trim() ?? "unknown",
+          modified: status?.modified.length ?? 0,
+          staged: status?.staged.length ?? 0,
+          untracked: status?.not_added.length ?? 0,
+          recent_commits: log?.all.map(c => ({
+            hash: c.hash.substring(0, 7),
+            message: c.message.substring(0, 80),
+            date: c.date,
+          })) ?? [],
+        };
+      } catch { /* not a git repo */ }
+
+      // ── 4. File counts by extension ───────────────────────────────────────
+      try {
+        const { readdir: fsReaddir2 } = await import("fs/promises");
+        const extCounts: Record<string, number> = {};
+        async function countExts(dir: string, d: number): Promise<void> {
+          if (d > 3) return;
+          const items = await fsReaddir2(dir, { withFileTypes: true });
+          for (const item of items) {
+            if (item.name.startsWith(".") || SKIP_DIRS.has(item.name)) continue;
+            if (item.isDirectory()) await countExts(pathJoin(dir, item.name), d + 1);
+            else {
+              const ext = item.name.includes(".") ? "." + item.name.split(".").pop()! : "(no ext)";
+              extCounts[ext] = (extCounts[ext] ?? 0) + 1;
+            }
+          }
+        }
+        await countExts(ctx.cwd, 0);
+        result.file_counts = Object.fromEntries(
+          Object.entries(extCounts).sort((a, b) => b[1] - a[1]).slice(0, 15)
+        );
+      } catch { /* ignore */ }
+
+      // ── 5. Detected commands hint ─────────────────────────────────────────
+      const scripts = (result.package as any)?.scripts ?? {};
+      const hints: string[] = [];
+      if (scripts.test) hints.push(`test: ${scripts.test}`);
+      if (scripts.build) hints.push(`build: ${scripts.build}`);
+      if (scripts.dev) hints.push(`dev: ${scripts.dev}`);
+      if (scripts.lint) hints.push(`lint: ${scripts.lint}`);
+      if (hints.length) result.detected_commands = hints;
+
+      return result;
+    },
+  }));
+
   return tools;
 }

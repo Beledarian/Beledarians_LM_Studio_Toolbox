@@ -25,17 +25,19 @@ export function createGitTools(ctx: ToolContext): Tool[] {
 
   tools.push(tool({
     name: "git_diff",
-    description: "Get the git diff of the current repository or specific files.",
+    description: "Get the git diff of the current repository or specific files. Use word_diff: true for prose/documentation changes — LLMs parse word-level diffs more accurately than line-level.",
     parameters: {
       file_path: z.string().optional().describe("Optional: Path to specific file to diff."),
       cached: z.boolean().optional().describe("Optional: Show staged changes only (git diff --cached)."),
+      word_diff: z.boolean().optional().default(false).describe("If true, show word-level diff (--word-diff=plain). Better for prose and documentation changes."),
     },
-    implementation: async ({ file_path, cached }) => {
+    implementation: async ({ file_path, cached, word_diff = false }) => {
       const { simpleGit } = await import("simple-git");
       const git = simpleGit(ctx.cwd);
       try {
         const args: string[] = [];
         if (cached) args.push("--cached");
+        if (word_diff) args.push("--word-diff=plain");
         if (file_path) args.push(validatePath(ctx.cwd, file_path, ctx.protectedPaths));
         const diff = await git.diff(args);
         return { diff: diff || "No changes." };

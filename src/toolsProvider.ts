@@ -90,6 +90,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
 
   // ── Sort: casual/general-purpose tools first, advanced/developer tools second ─
   const casualTools = new Set([
+    "analyze_project",
     "change_directory", "list_directory", "read_file", "read_file_range",
     "save_file", "move_file", "copy_file",
     "delete_path", "delete_files_by_pattern", "make_directory",
