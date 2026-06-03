@@ -8,8 +8,8 @@
     "push": "lms push",
     "typecheck": "tsc --noEmit",
     "build": "tsc",
-    "test": "node --test tests/browserActions.test.js tests/fuzzySearch.test.js tests/handoffMessage.test.js tests/subAgentToolCallParser.test.js tests/promptPreprocessor.test.js tests/nodeNotifier.test.js tests/subAgentValidation.test.js tests/i18n.test.js tests/memoryTools.test.js tests/security.test.js tests/fileTools.test.js tests/pythonSandbox.test.js tests/ragHelpers.test.js",
-    "coverage": "node_modules/.bin/c8 --reporter=text --reporter=html node --test tests/browserActions.test.js tests/fuzzySearch.test.js tests/handoffMessage.test.js tests/subAgentToolCallParser.test.js tests/promptPreprocessor.test.js tests/nodeNotifier.test.js tests/subAgentValidation.test.js tests/i18n.test.js tests/memoryTools.test.js tests/security.test.js tests/fileTools.test.js tests/pythonSandbox.test.js tests/ragHelpers.test.js",
+    "test": "node --test tests/browserActions.test.js tests/fuzzySearch.test.js tests/handoffMessage.test.js tests/subAgentToolCallParser.test.js tests/promptPreprocessor.test.js tests/nodeNotifier.test.js tests/subAgentValidation.test.js tests/i18n.test.js tests/memoryTools.test.js tests/security.test.js tests/fileTools.test.js tests/pythonSandbox.test.js tests/ragHelpers.test.js tests/webTools.test.js tests/queryDatabase.test.js tests/subAgentOrchestration.test.js",
+    "coverage": "node_modules/.bin/c8 --reporter=text --reporter=html node --test tests/browserActions.test.js tests/fuzzySearch.test.js tests/handoffMessage.test.js tests/subAgentToolCallParser.test.js tests/promptPreprocessor.test.js tests/nodeNotifier.test.js tests/subAgentValidation.test.js tests/i18n.test.js tests/memoryTools.test.js tests/security.test.js tests/fileTools.test.js tests/pythonSandbox.test.js tests/ragHelpers.test.js tests/webTools.test.js tests/queryDatabase.test.js tests/subAgentOrchestration.test.js",
     "lint": "eslint src/",
     "ci": "npm run typecheck && npm run lint && npm run build && npm run test"
   },
