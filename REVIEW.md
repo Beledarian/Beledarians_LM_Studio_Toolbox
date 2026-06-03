@@ -1,32 +1,28 @@
-# LM Studio Toolbox — Comprehensive Code Review
+# LM Studio Toolbox — Code Review (Second Pass)
 
 **Review date:** 2026-06-02
-**Reviewed against:** `main` @ `5c46897` (post PR #10)
-**Scope:** Full `src/` tree (29 modules, ~6,600 LoC), `tests/` (10 files, 107 cases), build/config, dependencies.
+**Reviewed against:** `main` @ `f260214` (v2.0.0, post-hardening)
+**Scope:** Full `src/` tree (30 modules, ~6,800 LoC), `tests/` (12 files, 162 cases), config, dependencies.
+**Supersedes:** The prior review (phases A–E) — all of its Critical/Major findings are now resolved and merged. This pass focuses on the **code added during that hardening cycle** (`safeFetch`, the embedding/DB caches, `protectedPaths` threading) plus a fresh full-tree audit.
 
 ---
 
 ## 1. Executive Summary
 
-The project is a mature, feature-rich LM Studio plugin that exposes a large tool surface (file I/O, code execution, web/browser automation, git/GitHub, RAG, SQLite memory, and a self-hosted secondary agent). The recent refactor (PRs #1–#10) split a 3,800-line monolith into focused modules with a shared mutable `ToolContext`, and the architecture is now clean and navigable. Error handling is generally defensive (most tools return `{ error }` rather than throwing), and the sub-agent tool-call parser is impressively robust against model output variance.
+The project is in markedly better shape than at the first review: dependency CVEs are patched, the workspace/SSRF/DB boundaries are now enforced rather than advertised, the sub-agent has time limits and correct tool aliases, and the test suite roughly doubled (94 → 162 passing) with real integration coverage for file and memory tools. Config↔locale parity is perfect (38/38 fields across all four languages), there are no leftover `TODO`/`.only`/skipped tests, and `npm run ci` (typecheck → lint → build → test) is green.
 
-**Overall health: moderate-to-good, with several serious security gaps that need urgent attention.**
+**However, the SSRF protection added in the last cycle has a complete bypass, and one new performance optimization introduced a silent correctness bug.** These are the headline items:
 
-The dominant concerns are not code-quality but **security and "phantom" safety features**:
+- **The `safeFetch` SSRF guard validates only the *initial* URL.** Node's `fetch` follows redirects by default, so a public URL that 302-redirects to `http://169.254.169.254/` (cloud metadata) sails straight through. The two tools that use it for arbitrary URLs (`fetch_web_content`, `rag_web_content`) carry **no permission gate**, so this is reachable by default. This defeats a control we explicitly documented as enforced in `SECURITY.md`.
+- **The RAG embedding cache is keyed by file path only, not by embedding model.** If a user changes the `embeddingModel` config mid-session, cached vectors from the old model are scored against a query embedded with the new model — dimensions mismatch, `cosineSimilarity` returns `NaN`, and results are silently dropped. The user gets empty/wrong RAG results with no error.
 
-- A **critical dependency RCE** (`simple-git`) sits directly under model-controlled input.
-- Three configuration fields (**`protectedPaths`, `searchApiKey`, `subAgentTimeLimit`**) are presented in the settings UI (localized into four languages) but are **never read or enforced** — users are given a false sense of safety/configuration.
-- The **workspace sandbox is advisory, not enforced**: `change_directory` can escape to any directory, after which every "workspace-validated" path resolves against the new root.
-- **SSRF and arbitrary-file disclosure** are possible through the web, browser, and database tools.
+Neither blocks normal operation, and the SSRF issue requires the model to be induced into fetching an attacker-controlled URL — but both undermine features we just shipped as "done." Everything else found is Minor: IPv6/encoded-IP SSRF edge cases, symlink-blind path validation, unbounded caches, one piece of dead code, and a real gap in factory-level test coverage for ~7 tool modules.
 
-None of these block normal operation, and most carry an LLM "permission gate," but in aggregate they mean the plugin's stated safety boundaries do not hold. The test suite, while green (94 pass / 12 skip), provides **weak real coverage**: the largest and riskiest modules (`fileTools`, `subAgentTools`, all web/browser/git/github tools) have no direct tests, and one test file (`fileEditingTools.test.js`) re-implements logic inline rather than importing the real code, producing false confidence.
-
-**Priorities (in order):**
-1. `npm audit fix` (resolves the `simple-git` RCE and 7 other CVEs, non-breaking).
-2. Implement or remove `protectedPaths`, `searchApiKey`, `subAgentTimeLimit` (no phantom features).
-3. Add fetch timeouts + an SSRF/host allowlist to the main web/browser tools.
-4. Decide and document the real filesystem trust boundary.
-5. Add integration tests that exercise the real tool implementations.
+**Priorities:**
+1. Fix the `safeFetch` redirect bypass (SEC-R1) — re-validate the host on every hop or disable redirects.
+2. Key the embedding cache by model name (BUG-R1).
+3. Add factory-level tests for the untested tool modules (TEST-R1), including SSRF redirect regression tests (TEST-R2).
+4. Sweep the Minor SSRF edge cases and cap the caches.
 
 ---
 
@@ -34,9 +30,9 @@ None of these block normal operation, and most carry an LLM "permission gate," b
 
 | Label | Meaning |
 |---|---|
-| **Critical** | Exploitable security hole, data-loss risk, or a safety feature that is entirely absent despite being advertised. Fix immediately. |
-| **Major** | Real bug, incorrect behavior, or meaningful security/perf weakness that will bite users. Fix soon. |
-| **Minor** | Cosmetic, consistency, or low-impact robustness issue. Fix opportunistically. |
+| **Critical** | Complete bypass of a security control protecting sensitive data, reachable by default. Fix immediately. |
+| **Major** | Real bug producing wrong results or a meaningful security/perf weakness. Fix soon. |
+| **Minor** | Edge case, hardening gap, dead code, or consistency issue. Fix opportunistically. |
 
 ---
 
@@ -46,17 +42,15 @@ None of these block normal operation, and most carry an LLM "permission gate," b
 
 | ID | Severity | Issue | Location |
 |---|---|---|---|
-| SEC-1 | **Critical** | `simple-git` is on a version range (`^3.30.0`) affected by **RCE via option-parsing bypass** (GHSA-jcxm-m3jx-f287, GHSA-hffm-xvc3-vprc, GHSA-r275-fr43-pm7q). All git tools pass model-controlled branch/remote/path strings straight into it. | `package.json`, `gitTools.ts` |
-| SEC-2 | **Critical** | `protectedPaths` config exists and is localized in 4 languages but is **never read anywhere** — there is no path-protection logic at all. Users configuring it get zero protection. | `config.ts:91`, all `locales/*`, (no consumer) |
-| SEC-3 | **Major** | **Workspace sandbox is not a boundary.** `change_directory` deliberately uses `resolve()` (not `validatePath`), so the model can `cd /` or `cd ~` and then every other tool's `validatePath(ctx.cwd, …)` re-roots at that location. Read/write/delete are effectively unrestricted. | `fileTools.ts:22-33`, `helpers.ts:8-15` |
-| SEC-4 | **Major** | **SSRF / internal-network access.** `fetch_web_content`, `rag_web_content`, `wikipedia_search` and the browser tools accept arbitrary hosts including `http://localhost`, RFC-1918 ranges, and `http://169.254.169.254/` (cloud metadata). No host allow/deny list. | `webTools.ts`, `browserTools.ts` |
-| SEC-5 | **Major** | **`file://` and arbitrary schemes** are accepted by `browser_session_open` / `browser_open_page` (no scheme check at all), enabling local-file read through the headless browser; `open_file` likewise hands arbitrary URLs to the OS opener. | `browserTools.ts:64-218`, `miscTools.ts:91-104` |
-| SEC-6 | **Major** | **`query_database` read-only bypass.** The guard is a regex on the statement *prefix* plus `readonly:true`. `ATTACH DATABASE '/abs/path/other.db' AS x; SELECT …` is not blocked and readonly mode still permits attaching & reading other SQLite files anywhere on disk. | `miscTools.ts:181-203` |
-| SEC-7 | **Major** | 8 dependency CVEs total (2 critical, 2 high, 4 moderate): `simple-git`, `basic-ftp` (path traversal), `@xmldom/xmldom` (XML injection), `minimatch`/`picomatch`/`underscore`/`brace-expansion` (ReDoS), `ip-address` (XSS), `ws`, `uuid`. All but `node-notifier` fixable non-breaking. | `package.json` |
-| SEC-8 | Minor | Browser `evaluate` action and the `evaluate` fallback in `safeClick` run arbitrary JS via `Function()` inside a `--no-sandbox` Chromium. Gated by `allowBrowserControl`, but worth documenting as an explicit code-execution surface. | `browserActions.ts:128-135`, `browserActions.ts:48-68` |
-| SEC-9 | Minor | `run_javascript`/`run_python`/`execute_command` temp scripts are written into the **workspace** (`temp_script_<ts>.ts/.py`), briefly exposing code on disk and risking collisions with user files / matching `delete_files_by_pattern`. Prefer `os.tmpdir()`. | `codeTools.ts:14,99` |
+| SEC-R1 | **Critical** | **`safeFetch` SSRF guard is bypassed by HTTP redirects.** `fetch` defaults to `redirect: "follow"`. Only the initial URL's hostname is checked; a public URL returning `302 Location: http://169.254.169.254/latest/meta-data/iam/security-credentials/` is followed without re-validation. `fetch_web_content` and `rag_web_content` use `safeFetch` on a model-supplied URL **and are not permission-gated**, so this is reachable by default and can exfiltrate cloud-instance credentials. | `helpers.ts:55-117` |
+| SEC-R2 | **Major** | **DNS rebinding / hostname-resolves-to-private-IP.** `safeFetch` blocks only literal IPs and the string `localhost`. `http://attacker.example/` whose DNS A-record points at `127.0.0.1` (or `169.254.169.254`) passes the hostname check, and `fetch` then connects to the private address. Fully closing this requires resolving the host yourself and connecting by validated IP (or an allowlist). At minimum, document the residual risk. | `helpers.ts:64-107` |
+| SEC-R3 | Minor | **IPv6 ULA range under-blocked.** `hostname.startsWith("fc00")` only matches addresses literally beginning `fc00`; the ULA block is `fc00::/7` (covers `fc00`–`fdff`). `fc01::`…`fcff::` are not blocked (`startsWith("fd")` catches only `fd00::/8`). | `helpers.ts:100-107` |
+| SEC-R4 | Minor | **Encoded-IP and IPv4-mapped-IPv6 SSRF bypass.** The IPv4 guard regex requires dotted-quad form, so `http://2130706433/` (decimal for `127.0.0.1`), `http://0x7f.0.0.1/` (hex), and `http://[::ffff:127.0.0.1]/` (IPv4-mapped IPv6) are not recognized as private. Whether they reach localhost depends on the platform resolver, but they should be normalized and blocked. | `helpers.ts:80-107` |
+| SEC-R5 | Minor | **Over-block of public `198.x` addresses.** `a === 198` blocks the entire `198.0.0.0/8`, but only `198.18.0.0/15` (benchmarking) and `198.51.100.0/24` (TEST-NET-2) are special — most of `198.x` is public and routable. This is a false-positive that will silently break legitimate fetches. | `helpers.ts:92` |
+| SEC-R6 | Minor | **`validatePath` is symlink-blind.** It uses `resolve()` (pure string math), not `realpath()`. A symlink created inside the workspace that points at `/etc` (or into a `protectedPaths` directory) passes validation; the subsequent fs call follows the link. Path-string validation cannot enforce a real boundary against symlinks. | `helpers.ts:14-30` |
+| SEC-R7 | Minor | **`protectedPaths` comparison is case-sensitive and `~`-blind.** On macOS/Windows (case-insensitive FS), a protected `/Users/me/Secret` does not block `/Users/me/secret`. And `parseProtectedPaths` resolves `~/secrets` to `<cwd>/~/secrets` rather than the home dir (the code comments acknowledge this). Document "absolute paths only," and lower-case-compare on case-insensitive platforms. | `helpers.ts:24-42` |
 
-**Notes on the LLM permission model:** Execution tools (`run_python`, `run_javascript`, shell, terminal, browser, DB) are correctly gated behind `allow*` config flags defaulting to `false`, and the Python sandbox (PR #6) and Deno sandbox are solid. The gaps above are about *non-execution* tools (file, web, db) whose stated boundaries don't hold.
+> **Reachability note:** `fetch_web_content` and `rag_web_content` are **not** wrapped in `createSafeToolImplementation` (only `wikipedia_search` is). They run on any turn. SEC-R1 therefore needs no special config to trigger.
 
 ---
 
@@ -64,168 +58,115 @@ None of these block normal operation, and most carry an LLM "permission gate," b
 
 | ID | Severity | Issue | Location |
 |---|---|---|---|
-| BUG-1 | **Major** | **`subAgentTimeLimit` is never enforced.** The config (default 600s) implies a runaway guard, but the loop is bounded only by `loopLimit = 8` iterations — there is no wall-clock deadline. A slow or looping model runs unbounded. | `subAgentTools.ts:50-…`, `config.ts:169` |
-| BUG-2 | **Major** | **Dead tool alias.** The parser maps `grep` and `search_file` → `search_file_content`, but **no such tool exists** in either the main set or the sub-agent (the real tool is `search_in_file`). A model emitting `grep` gets normalized to a non-existent tool → "Tool not found." Should map to `search_in_file`. | `subAgentToolCallParser.ts:94-95,127,160` |
-| BUG-3 | **Major** | **`finish_task` mismatch.** `validateToolCall` treats `finish_task` as a valid termination signal (returns `null`), but the sub-agent executor has no handler for it and the loop only recognizes the *text* `TASK_COMPLETED`/`TASK_FAILED`. A `{"tool":"finish_task"}` call → "Tool not found" → wasted loop iterations. | `toolCallValidator.ts:13-16`, `subAgentTools.ts:505` |
-| BUG-4 | **Major** | **No fetch/spawn timeouts in main tools.** `fetch_web_content`, `rag_web_content`, `wikipedia_search` (web tools) and every `gh`/`git` spawn in `githubTools.ts` have no timeout. A hung host blocks the tool call indefinitely. (PR #10 fixed only the *sub-agent* copies.) | `webTools.ts:251,282,312`, `githubTools.ts` |
-| BUG-5 | Minor | **`save_file` rejects spaces in filenames** via `/[ \*\?<>|"]/`. Legitimate names like `my file.txt` are blocked, and this is inconsistent with the sub-agent's batch save (which allows them). | `fileTools.ts:122` |
-| BUG-6 | Minor | **Memory injection misses un-migrated legacy data.** The first-turn injection (PR #9) reads only `.memories.db`; if a legacy `memory.md` exists but no memory tool has run yet (migration is lazy), those facts aren't injected. | `promptPreprocessor.ts:217-…`, `memoryTools.ts:36-68` |
-| BUG-7 | Minor | **`multi_replace_text` ignores overlapping ranges** and replaces only the first occurrence of `old_string` within each chunk. Overlapping replacements can corrupt output silently. | `fileTools.ts:238-262` |
-| BUG-8 | Minor | **Clipboard is Linux-`xclip`-only.** No `xsel` or Wayland (`wl-copy`/`wl-paste`) fallback; fails silently on common setups. | `miscTools.ts:38,71` |
-| BUG-9 | Minor | **`read_document` PDF path monkey-patches `global.DOMMatrix`** as a side effect and uses `require()` while the DOCX branch uses `await import()`. Fragile and inconsistent. | `miscTools.ts:135-153` |
+| BUG-R1 | **Major** | **Embedding cache ignores the embedding model.** `_embeddingCache` is keyed by absolute file path + mtime only. If the `embeddingModel` config changes between calls (or differs from what populated the cache), cached vectors from model A are compared against a query vector from model B. Different models have different dimensions → `cosineSimilarity` indexes past the shorter array → `NaN` → `NaN > minScore` is `false` → **all chunks silently dropped**. The user sees empty RAG results, no error. Fix: include `embeddingModelName` in the cache key (or clear the cache when it changes). | `helpers.ts:186, 240-277` |
+| BUG-R2 | Minor | **`cosineSimilarity` has no length guard.** Independently of the cache, if `vecA.length !== vecB.length` the `reduce` reads `undefined` and returns `NaN` rather than throwing or returning 0. A defensive `if (vecA.length !== vecB.length) return 0;` would make the BUG-R1 failure mode visible instead of silent. | `helpers.ts:285-291` |
+| BUG-R3 | Minor | **Background commands stuck in `running` are never pruned.** `pruneBackgroundCommands` only deletes entries whose `status !== "running"`. If a child process dies without emitting `close`/`exit` (rare, but possible on signal races), its entry stays `running` forever and leaks. Consider also pruning `running` entries older than their `timeoutMs` + grace. | `backgroundCommands.ts:22-29` |
+| BUG-R4 | Minor | **Memory injection reads a second DB connection.** `promptPreprocessor` opens its own `new Database(path, {readonly:true})` while `memoryTools.getDb` keeps a separate read-write connection cached for the same file. This works (better-sqlite3 is synchronous), but the readonly open **throws if the file doesn't exist yet** and is swallowed — correct, yet it means first-turn injection silently no-ops until a memory is saved through the tools. Minor, but worth a comment or sharing the cached handle. | `promptPreprocessor.ts:222-244` |
 
 ---
 
-### 3.3 Consistency (naming, style, architecture, patterns)
+### 3.3 Performance
 
 | ID | Severity | Issue | Location |
 |---|---|---|---|
-| CON-1 | Major | **Three different tool-gating patterns** coexist: (a) factory returns `[]` when disabled (`gitTools`, `githubTools`, `subAgentTools`, and per-tool in `miscTools`); (b) factory always returns tools that check `ctx.enableMemory` at runtime (`memoryTools`); (c) `createSafeToolImplementation` wrapper (`codeTools`, `webTools`, `browserTools`). Pick one. | multiple |
-| CON-2 | Minor | **`searchApiKey` is dead config** — defined and localized but never read; `web_search` uses only no-key providers. Either wire it into a keyed provider or remove it. | `config.ts:97` |
-| CON-3 | Minor | **`gh_push` is redundant and misnamed** — it shells out to `git push` (not `gh`) and duplicates the new `git_push`. Consolidate. | `githubTools.ts:225-242` |
-| CON-4 | Minor | **Inconsistent module loading:** `require()` vs `await import()` chosen ad hoc (`pdf-parse` require vs `mammoth` import; `better-sqlite3` require in `memoryTools` but import in `miscTools`/preprocessor). Document the rule (native addon → `require`) and apply uniformly. | `miscTools.ts`, `memoryTools.ts`, `promptPreprocessor.ts` |
-| CON-5 | Minor | **Inconsistent result counts** across the main/sub-agent split: `web_search` 10 vs 5, `wikipedia_search` 3 vs 1. Acceptable but undocumented divergence. | `webTools.ts` vs `subAgentTools.ts` |
-| CON-6 | Minor | **ESLint directives without ESLint.** Files contain `// eslint-disable-next-line …` but there is no ESLint config and no `lint` script — the directives are inert and nothing enforces style. | repo-wide |
-| CON-7 | Minor | **Result-shape divergence:** some tools throw (`change_directory`, `list_directory`, `delete_path`, `open_file`), most return `{ error }`. Throwing tools surface raw exceptions to the model. Standardize on `{ error }`. | `fileTools.ts`, `miscTools.ts` |
+| PERF-R1 | Minor | **`_embeddingCache` is unbounded.** Never evicted. Each entry holds every chunk's full embedding vector (e.g. 768 floats × N chunks × N files). A long session that runs RAG across many directories of a large repo grows process memory without limit. Add an LRU cap (by entry count or approximate bytes). | `helpers.ts:186` |
+| PERF-R2 | Minor | **`_dbCache` connections are never closed.** One SQLite handle per distinct workspace path, kept open for the process lifetime. `change_directory` across many folders accumulates open handles. Low impact (handles are cheap) but unbounded; consider closing the previous handle when `cwd` changes, or an idle sweep. | `memoryTools.ts:15-42` |
+| PERF-R3 | Minor | **`duckduckgo-fetch` provider has no timeout.** Every other outbound fetch now carries an `AbortSignal` timeout, but the raw `fetch` to `html.duckduckgo.com` (line 97) does not. A hung DDG endpoint blocks `web_search` indefinitely. The host is trusted (not an SSRF concern) but the timeout inconsistency should be closed. | `webTools.ts:97-102` |
 
 ---
 
-### 3.4 Efficiency & Performance
+### 3.4 Consistency & Dead Code
 
 | ID | Severity | Issue | Location |
 |---|---|---|---|
-| PERF-1 | Minor | **Memory DB opened per call + migration scanned per call.** Every `save/list/search/update/delete` opens a fresh `better-sqlite3` connection and `list/search/save` re-run `migrateLegacyFile` (a `readFile` of `memory.md`). Cache a module-level connection keyed by path; run migration once. | `memoryTools.ts:11-68` |
-| PERF-2 | Minor | **RAG re-embeds on every call with no cache.** `rag_local_files` (and the sub-agent copy) read and embed up to 50 files' chunks sequentially on each invocation; repeated queries re-pay the full cost. Cache embeddings keyed by file path + mtime; batch embeds. | `miscTools.ts:207-257`, `subAgentTools.ts` |
-| PERF-3 | Minor | **`search_directory` is fully sequential** and reads each file entirely into memory (2 MB cap, but no concurrency). Large trees are slow. Consider bounded parallelism. | `fileTools.ts:378-428` |
+| CON-R1 | Minor | **`getRunningCommandsStatus` is dead code.** Exported from `backgroundCommands.ts` but imported nowhere. Either wire it into the preprocessor (its apparent intent — remind the model of running jobs) or delete it. | `backgroundCommands.ts:31-46` |
+| CON-R2 | Minor | **Mixed fetch helpers in `webTools`.** Three call sites use `safeFetch`; one (`duckduckgo-fetch`) uses raw `fetch`. Intentional (trusted host) but undocumented — a comment would prevent a future "fix" from routing it through `safeFetch` and breaking the no-key path. | `webTools.ts:97` |
+| CON-R3 | Minor | **`any`-typed config object.** `ToolContext.pluginConfig: any` and `Database: new (path) => any` propagate `any` through the memory and config paths (47 `no-explicit-any` lint warnings total). Acceptable for SDK/native interop, but a typed `PluginConfig` facade would catch `pluginConfig.get("typo")` at compile time. | `context.ts:27`, multiple |
 
 ---
 
-### 3.5 Completeness / Dead Code
-
-| ID | Severity | Issue | Location |
-|---|---|---|---|
-| CMP-1 | Critical | `protectedPaths` — declared + localized, **0 consumers** (see SEC-2). | `config.ts:91` |
-| CMP-2 | Major | `subAgentTimeLimit` — declared + localized, **0 consumers** (see BUG-1). | `config.ts:169` |
-| CMP-3 | Minor | `searchApiKey` — declared + localized, **0 consumers** (see CON-2). | `config.ts:97` |
-| CMP-4 | Minor | Auto-summary feature referenced in comments but disabled ("Auto-summary disabled due to SDK type mismatch" was removed in PR #5; verify no stale references remain). | `promptPreprocessor.ts` |
-
----
-
-### 3.6 Tests
+### 3.5 Tests
 
 | ID | Severity | Issue |
 |---|---|---|
-| TEST-1 | **Major** | **`fileEditingTools.test.js` does not import the real code.** It re-implements file-edit logic inline against `fs/promises`, so regressions in `fileTools.ts` cannot be caught. This is false coverage — 14 green tests that test nothing in the codebase. |
-| TEST-2 | **Major** | **No tests for the highest-risk modules:** `fileTools`, `subAgentTools` (orchestration), `webTools`, `browserTools`, `gitTools`, `githubTools`, `miscTools`, `stateManager`, `helpers`, `toolsProvider`, `config`. Only `browserActions`, `fuzzySearch`, `handoffMessage`, `subAgentToolCallParser`, `toolCallValidator`, `i18n`, `memoryTools`, and one preprocessor helper are exercised. |
-| TEST-3 | **Major** | **No security/negative tests:** `validatePath` traversal, `change_directory` escape, SSRF rejection, `query_database` ATTACH, regex/ReDoS guards — none are tested. |
-| TEST-4 | Minor | **`promptPreprocessor.test.js` covers one helper only** (`getSubAgentDocsCandidatePaths`); none of memory injection, state I/O, message-count increment, or RAG-strategy selection. |
-| TEST-5 | Minor | **Memory tests degrade to near-zero on CI without build tools** — 12/13 cases skip when the `better-sqlite3` native binding is unavailable, so memory CRUD is effectively untested in many environments. Document a CI step that builds the binding, or provide a pure-JS fallback for tests. |
-| TEST-6 | Minor | **Python-sandbox smoke tests (PR #6) are not in the suite.** The 12 sandbox assertions were run ad hoc and never committed as a test. Add them (guarded by Python availability). |
-| TEST-7 | Minor | **No coverage tooling.** No `c8`/coverage gate; "94 pass" gives no signal about what fraction of branches run. |
+| TEST-R1 | **Major** | **Seven tool factories have no direct tests.** Only `createFileTools` and `createMemoryTools` are exercised at the factory level. `createCodeTools`, `createWebTools`, `createBrowserTools`, `createGitTools`, `createGithubTools`, `createMiscTools`, and `createSubAgentTools` (orchestration) have none. `gitTools` is especially worth covering — it can run against a temp `git init` repo deterministically. |
+| TEST-R2 | **Major** | **No SSRF regression tests for the actual gaps.** `security.test.js` covers literal-IP rejection well, but there is no test for the redirect bypass (SEC-R1), DNS-name-to-private-IP (SEC-R2), IPv6 ULA `fc01::` (SEC-R3), or encoded IPs (SEC-R4). The bypasses exist precisely where tests don't. |
+| TEST-R3 | Minor | **No test for the embedding cache.** `ragLocalFiles` and its mtime/model caching logic (the most intricate new code) are untested. A test could stub a fake embedding client, call twice, and assert the second call re-uses vectors (and re-embeds after a model change — which would have caught BUG-R1). |
+| TEST-R4 | Minor | **`promptPreprocessor` has one helper test only.** Memory injection, message-count increment, and RAG-strategy selection remain uncovered (carried over from the prior review). |
+| TEST-R5 | Minor | **Coverage is reported but not gated.** `npm run coverage` exists (c8) but isn't in `ci` and has no threshold, so coverage can silently regress. |
 
 ---
 
-### 3.7 Documentation
+### 3.6 Documentation — Good
 
-| ID | Severity | Issue |
-|---|---|---|
-| DOC-1 | Minor | `CODE_OVERVIEW.md` predates the modular refactor — verify it reflects the `src/tools/*` split and the SQLite memory model. |
-| DOC-2 | Minor | The real filesystem trust boundary (SEC-3) is undocumented. Users/operators should be told the model can leave the workspace via `change_directory`. |
-| DOC-3 | Minor | `toolsDocumentation.ts` (injected system prompt) should note the `run_python` sandbox limits and the SSRF posture once SEC-4 is addressed. |
+No issues. `SECURITY.md`, `CODE_OVERVIEW.md`, and `toolsDocumentation.ts` were refreshed this cycle and accurately reflect the code — **except** that `SECURITY.md` now lists SSRF prevention under "What IS enforced," which SEC-R1 contradicts. That row should be qualified ("blocks direct private-IP URLs; does not yet re-validate redirect targets") until SEC-R1 is fixed.
 
 ---
 
-## 4. File-by-File Issue Index
+## 4. File-by-File Index
 
-- **`package.json`** — SEC-1, SEC-7 (dep CVEs); CON-6 (no lint script).
-- **`config.ts`** — SEC-2/CMP-1 (`protectedPaths`), BUG-1/CMP-2 (`subAgentTimeLimit`), CON-2/CMP-3 (`searchApiKey`).
-- **`tools/fileTools.ts`** — SEC-3 (`change_directory` escape), BUG-5 (filename spaces), BUG-7 (`multi_replace_text`), CON-7 (throws), PERF-3 (`search_directory`).
-- **`tools/helpers.ts`** — SEC-3 (`validatePath` is only as strong as `ctx.cwd`); candidate home for a `protectedPaths` check.
-- **`tools/webTools.ts`** — SEC-4 (SSRF), BUG-4 (no timeouts).
-- **`tools/browserTools.ts`** — SEC-4/SEC-5 (no scheme/host check), SEC-8 (`evaluate`).
-- **`browserActions.ts`** — SEC-8 (`Function()` execution).
-- **`tools/miscTools.ts`** — SEC-5 (`open_file`), SEC-6 (`query_database` ATTACH), BUG-8 (clipboard), BUG-9 (`read_document`), PERF-2 (RAG).
-- **`tools/codeTools.ts`** — SEC-9 (temp files in workspace).
-- **`tools/gitTools.ts`** — SEC-1 (simple-git surface).
-- **`tools/githubTools.ts`** — BUG-4 (no spawn timeout), CON-3 (`gh_push` redundant/misnamed).
-- **`tools/memoryTools.ts`** — BUG-6 (legacy migration vs injection), PERF-1 (per-call connection/migration).
-- **`tools/subAgentTools.ts`** — BUG-1 (no time limit), BUG-3 (`finish_task`).
-- **`subAgentToolCallParser.ts`** — BUG-2 (`search_file_content` dead alias).
-- **`toolCallValidator.ts`** — BUG-3 (`finish_task` known here but unhandled downstream).
-- **`promptPreprocessor.ts`** — BUG-6 (legacy memory), CMP-4 (stale comments to verify).
-- **`tests/*`** — TEST-1…TEST-7.
+- **`tools/helpers.ts`** — SEC-R1 (redirect), SEC-R2 (DNS), SEC-R3 (IPv6 ULA), SEC-R4 (encoded IP), SEC-R5 (198/8 over-block), SEC-R6 (symlink), SEC-R7 (case/`~`), BUG-R1 (cache key), BUG-R2 (cosine length), PERF-R1 (unbounded cache).
+- **`tools/memoryTools.ts`** — PERF-R2 (unclosed connections).
+- **`tools/webTools.ts`** — PERF-R3 (DDG timeout), CON-R2 (mixed fetch).
+- **`backgroundCommands.ts`** — BUG-R3 (stuck-running prune), CON-R1 (dead `getRunningCommandsStatus`).
+- **`promptPreprocessor.ts`** — BUG-R4 (second DB connection).
+- **`tools/context.ts`** — CON-R3 (`any` config).
+- **`SECURITY.md`** — qualify the SSRF row until SEC-R1 lands.
+- **`tests/`** — TEST-R1…R5.
 
 ---
 
-## 5. Proposed Improvements & New Features
+## 5. Proposed Improvements & Features
 
-Beyond fixing the above:
-
-1. **Central HTTP helper** — one `safeFetch(url, { timeoutMs })` that enforces scheme allowlist, host denylist (localhost/RFC-1918/link-local/metadata), and a timeout. Replace the four+ scattered `fetch()` call sites (`webTools`, `subAgentTools`, `wikipedia`). Removes duplication and closes SEC-4/BUG-4 in one place.
-2. **Real `protectedPaths` enforcement** — parse the config into a glob/prefix denylist and check it inside `validatePath` (and `change_directory`), returning a clear error. Make it the documented safety boundary.
-3. **Enforce `subAgentTimeLimit`** — capture `const deadline = Date.now() + timeLimit*1000` and break the loop (and abort in-flight `fetch` via `AbortSignal`) when exceeded.
-4. **Memory DB connection cache** — module-level `Map<path, Database>` opened once; run migration once per path. Improves PERF-1 and makes the preprocessor injection consistent with the tools.
-5. **Embedding cache for RAG** — keyed by `path:mtime`, with batched `embed()` calls; big latency win for repeated queries (PERF-2).
-6. **ESLint + `lint` script + CI gate** — add a flat config, wire `npm run lint` into `ci`, and make the existing disable-directives meaningful (CON-6).
-7. **Integration test harness** — a helper that builds a temp workspace, constructs a fake `ToolContext`, and drives the real tool factories. Use it to cover fileTools, gitTools (against a temp repo), memoryTools, search, and the security negatives (TEST-1…3).
-8. **Consolidate git/github** — drop `gh_push` in favor of `git_push`; keep `gh_*` strictly for GitHub-API operations.
-9. **Tool-gating convention** — adopt the "factory returns `[]` when disabled" pattern everywhere except where a deliberate "tell the user to enable it" message is desired (document that exception for memory).
-10. **Temp files to `os.tmpdir()`** for code execution (SEC-9), keeping the workspace clean and avoiding accidental deletion.
+1. **Redirect-safe fetch (closes SEC-R1):** set `redirect: "manual"` in `safeFetch`, and on a 3xx, re-run the host validation against the `Location` header before following (cap the hop count, e.g. 5). This keeps redirects working for legitimate public sites while re-checking every hop.
+2. **Resolve-then-connect for SSRF (closes SEC-R2/R4):** use `dns.lookup({ all: true })` on the hostname, validate every returned address with a single `isBlockedAddress()` predicate (shared by the literal-IP path), and reject if any resolves private. Normalizes encoded forms as a side effect.
+3. **Unified `isBlockedAddress(ip)` helper:** factor the IPv4/IPv6 range logic out of `safeFetch` into one tested function. Fixes SEC-R3/R4/R5 in one place and makes them unit-testable.
+4. **Model-aware embedding cache key (closes BUG-R1):** key on `${embeddingModelName}::${absPath}`; add the length guard in `cosineSimilarity` (BUG-R2) as defense-in-depth.
+5. **LRU cap for both caches (PERF-R1/R2):** a small `Map`-based LRU (e.g. 200 files / 16 DB handles) with eviction + `db.close()` on evict.
+6. **Tool-factory test harness:** generalize the `makeCtx` + `callTool` pattern from `fileTools.test.js` into a shared helper, then cover git (temp repo), misc, web (with a mock fetch), and code tools.
+7. **Coverage gate:** add a `c8 --check-coverage --lines 60` step to `ci` once the factory tests land, ratcheting upward over time.
+8. **Typed config facade:** a thin `getConfig(ctl)` returning a typed object, replacing scattered `pluginConfig.get("string")` calls (CON-R3).
 
 ---
 
 ## 6. Implementation Strategy (phased, PR-sized)
 
-Each phase is independently shippable, test-gated, and mergeable to the fork. Severity-ordered.
+### Phase F — SSRF hardening (Critical/Major) · ~0.5 day
+- Extract `isBlockedAddress(ip)`; fix IPv6 ULA, encoded IPs, and the `198/8` over-block (SEC-R3/R4/R5).
+- Add `redirect: "manual"` + per-hop re-validation to `safeFetch` (SEC-R1).
+- Add `dns.lookup` resolve-and-validate (SEC-R2); document any residual rebinding window.
+- Tests: redirect-to-private-IP rejected, `fc01::` rejected, `2130706433` rejected, public `198.41.0.4` allowed (TEST-R2).
+- Re-qualify the `SECURITY.md` SSRF row.
 
-### Phase A — Security hotfix (Critical) · ~0.5 day
-- `npm audit fix` (resolves SEC-1 `simple-git` RCE + SEC-7 non-breaking CVEs); re-run `npm run ci`.
-- Manually bump `node-notifier` only if its breaking change is acceptable; otherwise document the residual `uuid` advisory.
-- **Decision required (ask user):** remove vs. implement the three phantom config fields. Recommended: implement `protectedPaths` (SEC-2) and `subAgentTimeLimit` (BUG-1) in this repo; remove or wire `searchApiKey` (CON-2).
-- Deliverable: dependency bump + a short SECURITY note in README documenting the trust model.
+### Phase G — RAG cache correctness (Major) · ~0.25 day
+- Key `_embeddingCache` by `model::path` (BUG-R1); add length guard to `cosineSimilarity` (BUG-R2).
+- Add LRU eviction to `_embeddingCache` (PERF-R1).
+- Test: stub embedding client, assert reuse on repeat + re-embed after model change (TEST-R3).
 
-### Phase B — Enforce the boundaries (Critical/Major) · ~1 day
-- Add `safeFetch()` central helper (timeout + SSRF allow/deny) and route all web/wikipedia/sub-agent fetches through it (SEC-4, BUG-4).
-- Add scheme allowlist to browser tools + `open_file` (SEC-5).
-- Implement `protectedPaths` enforcement in `validatePath`/`change_directory`; document that `change_directory` can leave the workspace and is now constrained by `protectedPaths` (SEC-3, SEC-2).
-- Harden `query_database`: reject `ATTACH`/`PRAGMA` and constrain `db_path` to the workspace (SEC-6).
-- Tests: SSRF rejection, protectedPaths denial, ATTACH rejection (TEST-3).
+### Phase H — Test coverage (Major) · ~1 day
+- Shared tool-factory test harness; cover git (temp repo), misc, web (mock fetch), code-tool wrappers (TEST-R1).
+- Preprocessor memory-injection + message-count tests (TEST-R4).
+- Add non-gating `c8 --check-coverage` baseline (TEST-R5).
 
-### Phase C — Sub-agent correctness (Major) · ~0.5 day
-- Enforce `subAgentTimeLimit` wall-clock deadline + `AbortSignal` on fetches (BUG-1).
-- Fix parser alias `search_file_content` → `search_in_file` (BUG-2).
-- Handle `finish_task` as a clean termination in the executor (BUG-3).
-- Add github/git spawn timeouts (BUG-4).
-- Tests: parser alias resolution, finish_task termination, time-limit break.
+### Phase I — Polish (Minor) · ~0.5 day
+- Symlink note + optional `realpath` enforcement for `protectedPaths` (SEC-R6); case-insensitive compare + `~` expansion (SEC-R7).
+- DDG fetch timeout (PERF-R3); `_dbCache` close-on-evict (PERF-R2).
+- Prune stuck `running` background commands (BUG-R3); wire or delete `getRunningCommandsStatus` (CON-R1).
+- Optional typed config facade (CON-R3).
 
-### Phase D — Test-suite hardening (Major) · ~1–1.5 days
-- Replace `fileEditingTools.test.js` with tests that import `createFileTools` against a temp workspace (TEST-1).
-- Add integration tests for fileTools (incl. path-traversal negatives), gitTools (temp repo), memoryTools (with a CI binding-build step), search/case-sensitivity, htmlToPlainText, and the preprocessor memory injection (TEST-2/4/5).
-- Commit the Python-sandbox smoke tests (TEST-6).
-- Add `c8` coverage reporting (non-gating first) (TEST-7).
-
-### Phase E — Consistency, performance, polish (Minor) · ~1 day
-- Memory DB connection cache + single migration (PERF-1).
-- RAG embedding cache + batching (PERF-2).
-- Unify tool-gating pattern (CON-1); consolidate `gh_push`/`git_push` (CON-3).
-- Move exec temp files to `os.tmpdir()` (SEC-9).
-- Add ESLint flat config + `lint` script in `ci` (CON-6).
-- Fix `save_file` filename validation to allow spaces (BUG-5); clipboard fallbacks (BUG-8); `read_document` cleanup (BUG-9).
-- Refresh `CODE_OVERVIEW.md` and the injected tool docs (DOC-1/2/3).
-
-**Sequencing note:** A → B → C are security-critical and should land before any feature work. D should land before E so the refactors in E are regression-protected. Each phase = one PR to `haggyroth/LM_Studio_Toolbox`, built and `npm run ci`-green, smoke-tested in a live LM Studio instance where the change is user-visible.
+**Sequencing:** F → G are correctness/security and should land first; H protects them with regression tests; I is cleanup. Each phase = one PR, `npm run ci`-green, smoke-tested live where user-visible.
 
 ---
 
-## 7. Quick-Reference Severity Tally
+## 7. Severity Tally
 
 | Severity | Count | IDs |
 |---|---|---|
-| **Critical** | 4 | SEC-1, SEC-2/CMP-1, SEC-7 (bundle), and (feature-absence) CMP-1 |
-| **Major** | 14 | SEC-3, SEC-4, SEC-5, SEC-6, BUG-1/CMP-2, BUG-2, BUG-3, BUG-4, CON-1, TEST-1, TEST-2, TEST-3 |
-| **Minor** | ~22 | SEC-8, SEC-9, BUG-5…BUG-9, CON-2…CON-7, PERF-1…3, CMP-3/4, TEST-4…7, DOC-1…3 |
+| **Critical** | 1 | SEC-R1 |
+| **Major** | 4 | SEC-R2, BUG-R1, TEST-R1, TEST-R2 |
+| **Minor** | 15 | SEC-R3…R7, BUG-R2…R4, PERF-R1…R3, CON-R1…R3, TEST-R3…R5 |
 
-> Counts overlap where a single root cause spans categories (e.g. `protectedPaths` = SEC-2 + CMP-1). Treat the **ID list**, not the headline number, as authoritative.
+> Overall health is **good and improving** — the codebase is far more robust than at the first review. The Critical item is a single, well-scoped fix (redirect re-validation), and the Major correctness bug (cache key) is a one-line change plus a test. The bulk of remaining work is test coverage for modules that currently rely on manual smoke-testing.
 
 ---
 
