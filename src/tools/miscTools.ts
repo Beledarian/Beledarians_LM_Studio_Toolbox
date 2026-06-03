@@ -203,15 +203,18 @@ export function createMiscTools(ctx: ToolContext): Tool[] {
         if (/^\s*(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|REPLACE|ATTACH|DETACH|PRAGMA)\b/i.test(query)) {
           return { error: "Only SELECT/read queries are allowed. Statements that modify data or attach external databases are blocked." };
         }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let db: any = null;
         try {
           const Database = (await import("better-sqlite3")).default;
-          const db = new Database(fpath, { readonly: true });
+          db = new Database(fpath, { readonly: true });
           const stmt = db.prepare(query);
           const results = stmt.all();
-          db.close();
           return { results };
         } catch (e) {
           return { error: `Database query failed: ${e instanceof Error ? e.message : String(e)}` };
+        } finally {
+          db?.close();
         }
       },
     }));
