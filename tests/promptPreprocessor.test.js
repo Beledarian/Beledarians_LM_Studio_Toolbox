@@ -1,7 +1,15 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
-const { getSubAgentDocsCandidatePaths } = require("../dist/promptPreprocessor.js");
+const { getDateTimeContext, getSubAgentDocsCandidatePaths } = require("../dist/promptPreprocessor.js");
+
+test("getDateTimeContext includes unambiguous UTC and local time", () => {
+  const context = getDateTimeContext(new Date("2026-08-30T10:15:30.000Z"), "Europe/Berlin");
+
+  assert.match(context, /UTC: 2026-08-30T10:15:30\.000Z/);
+  assert.match(context, /Local \(Europe\/Berlin\)/);
+  assert.match(context, /12:15:30/);
+});
 
 test("getSubAgentDocsCandidatePaths prefers plugin path then workspace fallback", () => {
   const workspace = path.resolve("/tmp/workspace");

@@ -25,6 +25,19 @@ export function getSubAgentDocsCandidatePaths(currentWorkingDirectory: string): 
   ];
 }
 
+export function getDateTimeContext(
+  now = new Date(),
+  timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+): string {
+  const localDateTime = new Intl.DateTimeFormat("en", {
+    dateStyle: "full",
+    timeStyle: "long",
+    timeZone,
+  }).format(now);
+
+  return `Current date and time at chat start:\n- UTC: ${now.toISOString()}\n- Local (${timeZone}): ${localDateTime}`;
+}
+
 export async function promptPreprocessor(ctl: PromptPreprocessorController, userMessage: ChatMessage) {
   const userPrompt = userMessage.getText();
   
@@ -237,7 +250,7 @@ export async function promptPreprocessor(ctl: PromptPreprocessorController, user
         ctl.debug("No startup.md file found or failed to load.");
     }
 
-    currentContent = `${injectionContent}\n\n---\n\n${currentContent}`;
+    currentContent = `${getDateTimeContext()}\n\n---\n\n${injectionContent}\n\n---\n\n${currentContent}`;
   }
 
   // Return the final content string if it changed, otherwise the original message
