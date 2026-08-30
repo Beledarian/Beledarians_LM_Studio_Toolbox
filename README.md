@@ -3,6 +3,8 @@
 [English](README.md) | [Deutsch](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox/blob/main/README.de.md) | [简体中文](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox/blob/main/README.zh-CN.md) | [繁體中文](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox/blob/main/README.zh-TW.md)
 
 [![GitHub](https://img.shields.io/badge/GitHub-Repository-blue?logo=github)](https://github.com/Beledarian/Beledarians_LM_Studio_Toolbox)
+> 🏆 **Featured in Micro Center's "8 Must-Have LM Studio Plugins"**:  
+> *"It's something of a one-stop-shop, and if you download just one plugin, this is the one to get."* — [Read the article](https://www.microcenter.com/site/mc-news/article/lm-studio-plugins.aspx)
 
 This project is a plugin for [LM Studio](https://lmstudio.ai/) that provides a rich set of tools to a large language model. It acts as a bridge between the LLM and your local environment, enabling autonomous coding, research, and file management.
 
