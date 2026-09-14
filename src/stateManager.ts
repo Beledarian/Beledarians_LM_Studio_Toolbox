@@ -12,31 +12,68 @@ export interface PluginState {
   subAgentDocsInjected: boolean;
   /** Locale ID to use for Layer 1 (Config UI) on next plugin restart. "auto" = OS detection. */
   uiLanguageOverride: string;
+  /** Last configured defaultWorkspacePath from plugin settings, to detect changes. */
+  lastConfiguredWorkspacePath?: string;
 }
 
-function resolveWorkspaceDirectory(configuredWorkspacePath?: string): string {
-  const raw = (configuredWorkspacePath ?? "").trim();
-  if (!raw) return DEFAULT_DIR;
+// ponytail: dead-simple ~ and env expansion, no extra dependencies
+export function expandPath(inputPath: string): string {
+  const raw = (inputPath ?? "").trim();
+  if (!raw) return "";
 
-  // Support Windows-style env vars in config values (e.g. %USERPROFILE%\projects\workspace)
-  const expanded = raw.replace(/%([^%]+)%/g, (_match, varName: string) => process.env[varName] ?? `%${varName}%`);
-  return isAbsolute(expanded) ? expanded : resolve(DEFAULT_DIR, expanded);
+  const withEnv = raw
+    .replace(/%([^%]+)%/g, (_match, varName: string) => process.env[varName] ?? `%${varName}%`)
+    .replace(/\$\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g, (_match, varName: string) => process.env[varName] ?? `\${${varName}}`)
+    .replace(/\$([a-zA-Z_][a-zA-Z0-9_]*)/g, (_match, varName: string) => process.env[varName] ?? `$${varName}`);
+
+  if (withEnv === "~") return os.homedir();
+  if (withEnv.startsWith("~/") || withEnv.startsWith("~\\")) {
+    return join(os.homedir(), withEnv.slice(2));
+  }
+  return withEnv;
+}
+
+// ponytail: pure helper for CWD resolution, config change detection, and ~ self-healing
+export function resolveActiveCwd(
+  persistedCwd: string | undefined,
+  lastConfigured: string | undefined,
+  rawConfigured: string,
+  configuredDirectory: string
+): string {
+  const configChanged = Boolean(rawConfigured && lastConfigured !== rawConfigured);
+  const isBogusPath = Boolean(persistedCwd && /[\\/]\~([\\/]|$)/.test(persistedCwd));
+  return (configChanged || isBogusPath) ? configuredDirectory : (persistedCwd ?? configuredDirectory);
+}
+
+export function resolveWorkspaceDirectory(configuredWorkspacePath?: string): string {
+  const expanded = expandPath(configuredWorkspacePath ?? "");
+  if (!expanded) return DEFAULT_DIR;
+  return isAbsolute(expanded) ? resolve(expanded) : resolve(DEFAULT_DIR, expanded);
 }
 
 export async function getPersistedState(configuredWorkspacePath?: string): Promise<PluginState> {
-  const configuredDirectory = resolveWorkspaceDirectory(configuredWorkspacePath);
+  const rawConfigured = (configuredWorkspacePath ?? "").trim();
+  const configuredDirectory = resolveWorkspaceDirectory(rawConfigured);
 
   try {
     const statePath = join(os.homedir(), ".beledarians-llm-toolbox", CONFIG_FILE_NAME);
     const content = await readFile(statePath, "utf-8");
     const state = JSON.parse(content);
+
+    const currentWorkingDirectory = resolveActiveCwd(
+      state.currentWorkingDirectory,
+      state.lastConfiguredWorkspacePath,
+      rawConfigured,
+      configuredDirectory
+    );
+
     return {
-      // configuredDirectory is a startup default/fallback, not a forced override
-      currentWorkingDirectory: state.currentWorkingDirectory ?? configuredDirectory,
+      currentWorkingDirectory,
       messageCount: state.messageCount ?? 0,
       dontAskToCompress: state.dontAskToCompress ?? false,
       subAgentDocsInjected: state.subAgentDocsInjected ?? false,
       uiLanguageOverride: state.uiLanguageOverride ?? "auto",
+      lastConfiguredWorkspacePath: rawConfigured || state.lastConfiguredWorkspacePath,
     };
   } catch (error) {
     return {
@@ -45,6 +82,7 @@ export async function getPersistedState(configuredWorkspacePath?: string): Promi
       dontAskToCompress: false,
       subAgentDocsInjected: false,
       uiLanguageOverride: "auto",
+      lastConfiguredWorkspacePath: rawConfigured,
     };
   }
 }

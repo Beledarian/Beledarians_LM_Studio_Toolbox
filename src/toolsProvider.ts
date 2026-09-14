@@ -6,7 +6,7 @@ import { join, resolve, dirname, isAbsolute, relative } from "path";
 import { z } from "zod";
 import { pluginConfigSchematics } from "./config";
 import { findLMStudioHome } from "./findLMStudioHome";
-import { getPersistedState, savePersistedState, ensureWorkspaceExists } from "./stateManager";
+import { getPersistedState, savePersistedState, ensureWorkspaceExists, expandPath } from "./stateManager";
 import { executeBrowserActions } from "./browserActions";
 import { rankFuzzyMatches } from "./fuzzySearch";
 import { extractHandoffMessage } from "./handoffMessage";
@@ -18,7 +18,8 @@ import type { Browser, Page } from "puppeteer";
 
 // --- Security Helper ---
 function validatePath(baseDir: string, requestedPath: string): string {
-  const resolved = resolve(baseDir, requestedPath);
+  // ponytail: expand ~ and env vars in requestedPath before validation
+  const resolved = resolve(baseDir, expandPath(requestedPath));
   
   // Use relative pathing to ensure the resolved path stays within baseDir
   const rel = relative(baseDir, resolved);
@@ -488,7 +489,9 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
       directory: z.string(),
     },
     implementation: async ({ directory }) => {
-      const newPath = resolve(currentWorkingDirectory, directory);
+      // ponytail: expand ~ and env vars so user/model can change directory to ~/Documents
+      const expanded = expandPath(directory);
+      const newPath = isAbsolute(expanded) ? resolve(expanded) : resolve(currentWorkingDirectory, expanded);
       const stats = await stat(newPath);
       if (!stats.isDirectory()) {
         throw new Error(`Path is not a directory: ${newPath}`);
