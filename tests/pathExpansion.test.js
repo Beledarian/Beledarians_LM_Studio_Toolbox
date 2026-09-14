@@ -85,3 +85,41 @@ test("resolveActiveCwd self-heals corrupted CWD containing literal '~' path comp
   assert.equal(result, fixedTarget);
 });
 
+test("expandPath preserves files starting with tilde that are not home directories", () => {
+  assert.equal(expandPath("~backup.txt"), "~backup.txt");
+  assert.equal(expandPath("folder/~temp.swp"), "folder/~temp.swp");
+});
+
+test("expandPath preserves undefined environment variables intact", () => {
+  assert.equal(expandPath("$NONEXISTENT_VAR/sub"), "$NONEXISTENT_VAR/sub");
+  assert.equal(expandPath("${NONEXISTENT_VAR}/sub"), "${NONEXISTENT_VAR}/sub");
+  assert.equal(expandPath("%NONEXISTENT_VAR%\\sub"), "%NONEXISTENT_VAR%\\sub");
+});
+
+test("expandPath trims surrounding whitespace", () => {
+  assert.equal(expandPath("   ~/Documents   "), path.join(os.homedir(), "Documents"));
+});
+
+test("resolveActiveCwd updates CWD when user clears custom workspace setting back to default", () => {
+  const defaultDir = path.join(os.homedir(), ".beledarians-llm-toolbox", "workspace");
+  const result = resolveActiveCwd(
+    "/home/user/OldDocuments", // persistedCwd
+    "/home/user/OldDocuments", // lastConfigured
+    "",                        // rawConfigured cleared
+    defaultDir                 // configuredDirectory is DEFAULT_DIR
+  );
+  assert.equal(result, defaultDir);
+});
+
+test("resolveActiveCwd self-heals CWD starting directly with ~", () => {
+  const fixedTarget = path.join(os.homedir(), "Documents");
+  const result = resolveActiveCwd(
+    "~/Documents",
+    "~/Documents",
+    "~/Documents",
+    fixedTarget
+  );
+  assert.equal(result, fixedTarget);
+});
+
+

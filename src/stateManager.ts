@@ -40,8 +40,10 @@ export function resolveActiveCwd(
   rawConfigured: string,
   configuredDirectory: string
 ): string {
-  const configChanged = Boolean(rawConfigured && lastConfigured !== rawConfigured);
-  const isBogusPath = Boolean(persistedCwd && /[\\/]\~([\\/]|$)/.test(persistedCwd));
+  // Config changed if lastConfigured was tracked and differs from current rawConfigured (even if cleared)
+  const configChanged = Boolean(lastConfigured !== undefined && lastConfigured !== rawConfigured);
+  // Match ~ as a standalone segment either at start of path or after a path separator
+  const isBogusPath = Boolean(persistedCwd && /(?:^|[\\/])\~(?=[\\/]|$)/.test(persistedCwd));
   return (configChanged || isBogusPath) ? configuredDirectory : (persistedCwd ?? configuredDirectory);
 }
 
@@ -73,7 +75,7 @@ export async function getPersistedState(configuredWorkspacePath?: string): Promi
       dontAskToCompress: state.dontAskToCompress ?? false,
       subAgentDocsInjected: state.subAgentDocsInjected ?? false,
       uiLanguageOverride: state.uiLanguageOverride ?? "auto",
-      lastConfiguredWorkspacePath: rawConfigured || state.lastConfiguredWorkspacePath,
+      lastConfiguredWorkspacePath: rawConfigured,
     };
   } catch (error) {
     return {
